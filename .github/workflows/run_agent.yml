@@ -4,10 +4,13 @@ on:
   schedule:
     - cron: '15 * * * *'  # Every hour at :15
   workflow_dispatch:       # Manual trigger from GitHub UI
+  issues:
+    types: [labeled]      # Trigger when any issue is labeled
 
 jobs:
   run_agent:
     runs-on: ubuntu-latest
+    if: github.event_name != 'issues' || github.event.label.name == 'ready'
 
     permissions:
       issues: write
