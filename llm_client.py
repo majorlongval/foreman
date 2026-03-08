@@ -133,14 +133,18 @@ class GeminiBackend:
     def complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
         from google.genai import types
 
+        config_kwargs = dict(
+            system_instruction=system,
+            max_output_tokens=max_tokens,
+        )
+        # Flash supports disabling thinking (saves tokens); Pro requires it
+        if "flash" in model.lower():
+            config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+
         response = self.client.models.generate_content(
             model=model,
             contents=message,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                max_output_tokens=max_tokens,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
+            config=types.GenerateContentConfig(**config_kwargs),
         )
 
         # Extract token counts from usage metadata
