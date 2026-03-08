@@ -480,7 +480,9 @@ def main():
     agent = ImplementAgent(github, dry_run=args.dry_run)
 
     if args.once or args.issue:
-        agent.run_once(issue_number=args.issue)
+        stats = agent.run_once(issue_number=args.issue)
+        if stats["failed"] > 0 and stats["implemented"] == 0:
+            sys.exit(1)  # signal failure to GitHub Actions
     else:
         agent.run_loop()
 
