@@ -46,7 +46,8 @@ LABEL_DRAFT = "draft"
 LABEL_READY = "ready"  # refined and ready for implementation
 
 # Safety: labels we NEVER process through the refine pipeline
-FORBIDDEN_LABELS = {LABEL_AUTO_REFINED, LABEL_REFINED_OUT, LABEL_DRAFT, LABEL_READY}
+LABEL_IMPLEMENTING = "foreman-implementing"
+FORBIDDEN_LABELS = {LABEL_AUTO_REFINED, LABEL_REFINED_OUT, LABEL_DRAFT, LABEL_READY, LABEL_IMPLEMENTING}
 
 # ─── Logging ──────────────────────────────────────────────────
 

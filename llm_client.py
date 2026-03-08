@@ -294,12 +294,12 @@ ROUTING_PROFILES = {
     "cheap": {
         # Minimize cost — Gemini only, no Anthropic required
         "refine": "gemini/gemini-2.5-flash",
-        "brainstorm": "gemini/gemini-2.5-pro",
+        "brainstorm": "gemini/gemini-2.5-flash",
         "review": "gemini/gemini-2.5-flash",
         "title_gen": "gemini/gemini-2.5-flash",
         "commit_msg": "gemini/gemini-2.5-flash",
-        "implement": "gemini/gemini-2.5-pro",
-        "plan": "gemini/gemini-2.5-pro",
+        "implement": "gemini/gemini-2.5-flash",
+        "plan": "gemini/gemini-2.5-flash",
     },
     "balanced": {
         # Balance cost and quality
