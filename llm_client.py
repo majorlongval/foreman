@@ -139,6 +139,7 @@ class GeminiBackend:
             config=types.GenerateContentConfig(
                 system_instruction=system,
                 max_output_tokens=max_tokens,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
 
@@ -292,14 +293,14 @@ class LLMClient:
 # Predefined routing profiles — maps task types to models
 ROUTING_PROFILES = {
     "cheap": {
-        # Minimize cost — Gemini only, no Anthropic required
-        "refine": "gemini/gemini-2.5-flash",
-        "brainstorm": "gemini/gemini-2.5-flash",
-        "review": "gemini/gemini-2.5-flash",
+        # Pro for decisions, Flash for cheap mechanical tasks
+        "refine": "gemini/gemini-2.5-pro",
+        "brainstorm": "gemini/gemini-2.5-pro",
+        "review": "gemini/gemini-2.5-pro",
         "title_gen": "gemini/gemini-2.5-flash",
         "commit_msg": "gemini/gemini-2.5-flash",
-        "implement": "gemini/gemini-2.5-flash",
-        "plan": "gemini/gemini-2.5-flash",
+        "implement": "gemini/gemini-2.5-pro",
+        "plan": "gemini/gemini-2.5-pro",
     },
     "balanced": {
         # Balance cost and quality
