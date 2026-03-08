@@ -33,6 +33,7 @@ REPO_NAME = os.environ.get("FOREMAN_REPO", "")  # e.g. "jordanuser/foreman"
 POLL_INTERVAL_SEC = int(os.environ.get("POLL_INTERVAL", "60"))
 BRAINSTORM_THRESHOLD = int(os.environ.get("BRAINSTORM_THRESHOLD", "2"))
 BRAINSTORM_MAX_DRAFTS = int(os.environ.get("BRAINSTORM_MAX_DRAFTS", "5"))
+MAX_OPEN_DRAFTS = int(os.environ.get("MAX_OPEN_DRAFTS", "10"))
 COST_CEILING_USD = float(os.environ.get("COST_CEILING_USD", "5.0"))
 
 # Routing profile: "cheap", "balanced", or "quality"
@@ -397,9 +398,14 @@ class ForemanAgent:
                     break
                 time.sleep(2)  # Be nice to APIs
         elif len(queue) < BRAINSTORM_THRESHOLD or force_brainstorm:
-            # BRAINSTORM MODE
-            log.info(f"  Queue ({len(queue)}) below threshold ({BRAINSTORM_THRESHOLD}) — brainstorming")
-            self.brainstorm()
+            # BRAINSTORM MODE — check open draft cap first
+            open_issues = self.github.get_all_open_issues()
+            open_count = len(open_issues)
+            if not force_brainstorm and open_count >= MAX_OPEN_DRAFTS:
+                log.info(f"  💤 Skipping brainstorm — {open_count} open issues >= cap ({MAX_OPEN_DRAFTS})")
+            else:
+                log.info(f"  Queue ({len(queue)}) below threshold ({BRAINSTORM_THRESHOLD}) — brainstorming")
+                self.brainstorm()
         else:
             log.info("  Nothing to do, waiting...")
 
