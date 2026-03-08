@@ -1,0 +1,52 @@
+name: Run Implement Agent
+
+on:
+  issues:
+    types: [labeled]      # Triggers when any issue is labeled
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to implement'
+        required: true
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ready'
+
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install --quiet anthropic PyGithub google-genai
+
+      - name: Run Implement Agent (label trigger)
+        if: github.event_name == 'issues'
+        run: python implement_agent.py --issue ${{ github.event.issue.number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FOREMAN_REPO: ${{ secrets.FOREMAN_REPO }}
+          ROUTING_PROFILE: cheap
+          COST_CEILING_USD: "3.0"
+
+      - name: Run Implement Agent (manual trigger)
+        if: github.event_name == 'workflow_dispatch'
+        run: python implement_agent.py --issue ${{ inputs.issue_number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FOREMAN_REPO: ${{ secrets.FOREMAN_REPO }}
+          ROUTING_PROFILE: cheap
+          COST_CEILING_USD: "3.0"
