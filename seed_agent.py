@@ -295,9 +295,9 @@ class ForemanAgent:
             # Extract a better title — route to title_gen (usually cheapest model)
             title_response = self._complete(
                 task="title_gen",
-                system="Generate ONLY an imperative title. No explanation. No quotes.",
+                system="Generate ONLY an imperative title. No explanation. No quotes. Maximum 10 words.",
                 message=f"Generate a title for this issue:\n\n{refined_body}",
-                max_tokens=100,
+                max_tokens=500,
             )
             refined_title = title_response.text.strip().strip('"').strip("'")
 
