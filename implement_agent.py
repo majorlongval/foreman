@@ -348,8 +348,9 @@ class ImplementAgent:
                     task="implement",
                     system=IMPLEMENT_SYSTEM,
                     message=self._build_implement_message(issue, plan, file_spec, context),
-                    max_tokens=4000,
+                    max_tokens=8000,
                 )
+                log.info(f"  Generated {len(impl_response.text or '')} chars for {file_spec['path']}")
                 if not self.cost.check_ceiling():
                     return False
 
@@ -361,11 +362,18 @@ class ImplementAgent:
                     max_tokens=200,
                 )
 
+                # Validate content before committing
+                content = impl_response.text
+                if not content or not content.strip():
+                    log.error(f"  LLM returned empty content for {file_spec['path']} — skipping")
+                    self.stats["failed"] += 1
+                    continue
+
                 # Commit
                 self.github.commit_file(
                     branch=branch,
                     path=file_spec["path"],
-                    content=impl_response.text,
+                    content=content,
                     message=commit_response.text.strip(),
                     existing_sha=existing_sha,
                 )

@@ -152,9 +152,19 @@ class GeminiBackend:
         input_tokens = usage.prompt_token_count or 0
         output_tokens = usage.candidates_token_count or 0
 
+        text = response.text
+        if text is None:
+            # Response was blocked or empty — log finish reason for debugging
+            try:
+                reason = response.candidates[0].finish_reason
+                log.warning(f"  Gemini returned None text, finish_reason={reason}")
+            except Exception:
+                log.warning("  Gemini returned None text (no candidates)")
+            text = ""
+
         model_key = f"gemini/{model}"
         return LLMResponse(
-            text=response.text,
+            text=text,
             model=model,
             provider="gemini",
             input_tokens=input_tokens,
