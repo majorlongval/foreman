@@ -3,11 +3,7 @@ name: Run Implement Agent
 on:
   issues:
     types: [labeled]      # Triggers when any issue is labeled
-  workflow_dispatch:
-    inputs:
-      issue_number:
-        description: 'Issue number to implement'
-        required: true
+  workflow_dispatch:      # Manual trigger — picks next ready issue automatically
 
 jobs:
   implement:
@@ -41,9 +37,9 @@ jobs:
           ROUTING_PROFILE: cheap
           COST_CEILING_USD: "3.0"
 
-      - name: Run Implement Agent (manual trigger)
+      - name: Run Implement Agent (manual trigger — picks next ready issue)
         if: github.event_name == 'workflow_dispatch'
-        run: python implement_agent.py --issue ${{ inputs.issue_number }}
+        run: python implement_agent.py --once
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
