@@ -38,6 +38,10 @@ COST_CEILING_USD = float(os.environ.get("COST_CEILING_USD", "5.0"))
 # Routing profile: "cheap", "balanced", or "quality"
 ROUTING_PROFILE = os.environ.get("ROUTING_PROFILE", "balanced")
 
+# Optional Telegram Notifications
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+
 # Labels
 LABEL_NEEDS_REFINEMENT = "needs-refinement"
 LABEL_AUTO_REFINED = "auto-refined"
@@ -62,6 +66,7 @@ log = logging.getLogger("foreman")
 
 from cost_monitor import CostTracker, CloudCostMonitor, create_cost_system
 from llm_client import LLMClient, ModelRouter
+from telegram_notifier import TelegramNotifier
 
 
 # ─── Vision Loader ───────────────────────────────────────────
@@ -90,380 +95,124 @@ class GitHubClient:
         self._ensure_labels()
 
     def _ensure_labels(self):
-        """Create our labels if they don't exist."""
-        existing = {l.name for l in self.repo.get_labels()}
-        label_configs = {
-            LABEL_NEEDS_REFINEMENT: "fbca04",  # yellow
-            LABEL_AUTO_REFINED: "0e8a16",      # green
-            LABEL_REFINED_OUT: "e4e669",       # muted yellow — closed originals
-            LABEL_DRAFT: "c5def5",              # light blue
-            LABEL_READY: "0075ca",              # blue — ready for implementation
-        }
-        for name, color in label_configs.items():
-            if name not in existing:
-                if not self.dry_run:
-                    self.repo.create_label(name=name, color=color)
-                log.info(f"  Created label: {name}")
-
-    def get_refinement_queue(self) -> list:
-        """Get open issues labeled 'needs-refinement', excluding forbidden labels."""
-        issues = self.repo.get_issues(
-            state="open",
-            labels=[self.repo.get_label(LABEL_NEEDS_REFINEMENT)],
-            sort="created",
-            direction="asc",
-        )
-        safe_issues = []
-        for issue in issues:
-            issue_labels = {l.name for l in issue.labels}
-            if issue_labels & FORBIDDEN_LABELS:
-                log.warning(f"  ⛔ Skipping #{issue.number} — has forbidden label: {issue_labels & FORBIDDEN_LABELS}")
-                continue
-            safe_issues.append(issue)
-        return safe_issues
-
-    def get_all_open_issues(self) -> list:
-        """Get all open issues for context (brainstorm dedup)."""
-        return list(self.repo.get_issues(state="open"))
-
-    def get_closed_issues(self, count: int = 50) -> list:
-        """Get recently closed issues for context."""
-        return list(self.repo.get_issues(state="closed", sort="updated", direction="desc")[:count])
-
-    def create_refined_issue(self, original_issue, refined_body: str, refined_title: str) -> int:
-        """Create a new refined issue and close the original with a link."""
+        """Ensure all required labels exist in the repo."""
+        required_labels = [
+            (LABEL_NEEDS_REFINEMENT, "b1e100", "Issue needs to be broken down into a detailed spec"),
+            (LABEL_AUTO_REFINED, "0E8A16", "Issue was automatically refined by the agent"),
+            (LABEL_REFINED_OUT, "D93F0B", "Original issue that was refined into a new one"),
+            (LABEL_DRAFT, "fbca04", "A draft idea, not ready for implementation"),
+            (LABEL_READY, "1d76db", "Ready for implementation"),
+            (LABEL_IMPLEMENTING, "8474A4", "Currently being implemented by an agent"),
+        ]
         if self.dry_run:
-            log.info(f"  [DRY RUN] Would create refined issue from #{original_issue.number}")
-            log.info(f"  [DRY RUN] Title: {refined_title}")
-            return -1
-
-        # Create new issue
-        new_issue = self.repo.create_issue(
-            title=refined_title,
-            body=refined_body + f"\n\n---\n_Auto-refined from #{original_issue.number}_",
-            labels=[self.repo.get_label(LABEL_AUTO_REFINED)],
-        )
-
-        # Close original with cross-reference
-        original_issue.add_to_labels(self.repo.get_label(LABEL_REFINED_OUT))
-        original_issue.remove_from_labels(self.repo.get_label(LABEL_NEEDS_REFINEMENT))
-        original_issue.create_comment(
-            f"🤖 Refined by FOREMAN → #{new_issue.number}\n\n"
-            f"This issue has been closed because a structured version was created. "
-            f"The original content is preserved here for audit purposes."
-        )
-        original_issue.edit(state="closed", state_reason="completed")
-
-        log.info(f"  ✅ #{original_issue.number} → #{new_issue.number} (original closed)")
-        return new_issue.number
-
-    def create_draft_issues(self, drafts: list[dict]) -> list[int]:
-        """Create draft issues from brainstorm output."""
-        created = []
-        for draft in drafts:
-            if self.dry_run:
-                log.info(f"  [DRY RUN] Would create draft: {draft['title']}")
-                created.append(-1)
-                continue
-
-            issue = self.repo.create_issue(
-                title=draft["title"],
-                body=draft["body"] + "\n\n---\n_Auto-generated by FOREMAN brainstorm mode_",
-                labels=[self.repo.get_label(LABEL_DRAFT)],
-            )
-            log.info(f"  📝 Created draft #{issue.number}: {draft['title']}")
-            created.append(issue.number)
-        return created
-
-
-# ─── Claude Prompts ──────────────────────────────────────────
-
-REFINE_SYSTEM = """You are FOREMAN, an autonomous agent that refines GitHub issues into 
-well-structured, actionable development tasks.
-
-You will receive an issue title and body. Rewrite it into the following structure:
-
-## Summary
-One-line description of what this task accomplishes.
-
-## Acceptance Criteria
-- [ ] Criterion 1 (specific, testable)
-- [ ] Criterion 2
-(minimum 3 criteria)
-
-## Steps to Reproduce (include ONLY if this is a bug)
-1. Step 1
-2. Step 2
-3. Expected vs actual behavior
-
-## Component/Area
-Which part of the system this touches. Choose from:
-agent-loop, github-integration, telegram-bot, dashboard, infrastructure, 
-vision, documentation, testing, ci-cd
-
-## Subtasks
-Break the work into concrete subtasks:
-- [ ] Subtask 1
-- [ ] Subtask 2
-(minimum 2 subtasks)
-
-## Complexity Estimate
-- T-shirt size: XS / S / M / L / XL
-- Estimated API cost: low / medium / high
-
-Rules:
-- Keep the original intent but make it precise and actionable
-- If the original is vague, make reasonable assumptions and state them
-- Title should be imperative: "Add X", "Fix Y", "Implement Z"
-- Be concise. No filler. Every word earns its place.
-"""
-
-BRAINSTORM_SYSTEM = """You are FOREMAN, an autonomous agent that generates new development tasks
-for a self-improving dev pipeline project.
-
-You have access to:
-1. VISION.md — the project's north star (goals, roadmap, architecture)
-2. A list of existing open issues — so you don't create duplicates
-3. A list of recently completed issues — so you know what's done
-
-Your job: identify GAPS between the vision and current state, then propose
-new issues that move the project forward.
-
-Rules:
-- Generate exactly {max_drafts} task proposals
-- Each task must be concrete and implementable in 1-4 hours
-- Don't duplicate existing open issues (check titles and descriptions)
-- Prioritize tasks from the CURRENT phase in the roadmap
-- If current phase is nearly complete, start proposing next-phase tasks
-- Focus on unblocking other work first (dependencies, infrastructure)
-
-For each task, output a JSON array of objects with:
-- "title": imperative title ("Add X", "Fix Y", "Implement Z")
-- "body": full issue body using the refined ticket structure from VISION.md
-- "reasoning": one sentence explaining WHY this task matters now (not included in issue)
-
-Output ONLY valid JSON. No markdown fences. No preamble."""
-
-
-# ─── Agent Logic ─────────────────────────────────────────────
-
-class ForemanAgent:
-    def __init__(self, github: GitHubClient, dry_run: bool = False):
-        self.github = github
-        self.llm = LLMClient()
-        self.router = ModelRouter(ROUTING_PROFILE)
-        self.cost = CostTracker(ceiling_usd=COST_CEILING_USD)
-        self.vision = load_vision()
-        self.dry_run = dry_run
-        self.stats = {"refined": 0, "brainstormed": 0, "skipped": 0, "failed": 0}
-
-        log.info(f"\n{self.router.summary()}\n")
-
-    def _complete(self, task: str, system: str, message: str, max_tokens: int = 2000):
-        """Unified completion that routes to the right model and tracks cost."""
-        model = self.router.get(task)
-        response = self.llm.complete(model, system, message, max_tokens)
-
-        # Record in cost tracker (create a duck-typed usage object)
-        class _Usage:
-            def __init__(self, inp, out):
-                self.input_tokens = inp
-                self.output_tokens = out
-        self.cost.record(model, _Usage(response.input_tokens, response.output_tokens),
-                         agent="seed", action=task)
-        return response
-
-    def refine_issue(self, issue) -> bool:
-        """Refine a single issue. Returns True on success."""
-        log.info(f"🔧 Refining #{issue.number}: {issue.title}")
-
+            return
+        
         try:
-            response = self._complete(
-                task="refine",
-                system=REFINE_SYSTEM,
-                message=(
-                    f"Issue Title: {issue.title}\n\n"
-                    f"Issue Body:\n{issue.body or '(empty)'}\n\n"
-                    f"Labels: {', '.join(l.name for l in issue.labels)}"
-                ),
-            )
+            existing_labels = {label.name for label in self.repo.get_labels()}
+            for name, color, description in required_labels:
+                if name not in existing_labels:
+                    log.info(f"Creating label '{name}'")
+                    self.repo.create_label(name, color, description)
+        except GithubException as e:
+            log.error(f"Error ensuring labels: {e}. Check repo permissions.")
+            raise
 
-            if not self.cost.check_ceiling():
-                return False
-
-            refined_body = response.text
-
-            # Extract a better title — route to title_gen (usually cheapest model)
-            title_response = self._complete(
-                task="title_gen",
-                system="Generate ONLY an imperative title. No explanation. No quotes. Maximum 10 words.",
-                message=f"Generate a title for this issue:\n\n{refined_body}",
-                max_tokens=500,
-            )
-            refined_title = title_response.text.strip().strip('"').strip("'")
-
-            self.github.create_refined_issue(issue, refined_body, refined_title)
-            self.stats["refined"] += 1
-            return True
-
-        except Exception as e:
-            log.error(f"  ❌ Failed to refine #{issue.number}: {e}")
-            self.stats["failed"] += 1
-            return False
-
-    def brainstorm(self) -> list[int]:
-        """Generate draft issues from VISION.md + current state."""
-        log.info("🧠 Entering BRAINSTORM mode")
-
-        if not self.vision:
-            log.warning("  Cannot brainstorm without VISION.md")
-            return []
-
-        # Gather context
-        open_issues = self.github.get_all_open_issues()
-        closed_issues = self.github.get_closed_issues(30)
-
-        open_summary = "\n".join(
-            f"- #{i.number} [{', '.join(l.name for l in i.labels)}] {i.title}"
-            for i in open_issues
-        )
-        closed_summary = "\n".join(
-            f"- #{i.number} [DONE] {i.title}"
-            for i in closed_issues
-        )
-
+    def find_issue_to_refine(self):
+        """Find the oldest open issue with 'needs-refinement' label."""
         try:
-            response = self._complete(
-                task="brainstorm",
-                system=BRAINSTORM_SYSTEM.format(max_drafts=BRAINSTORM_MAX_DRAFTS),
-                message=(
-                    f"## VISION.md\n\n{self.vision}\n\n"
-                    f"## Open Issues\n\n{open_summary or '(none)'}\n\n"
-                    f"## Recently Completed\n\n{closed_summary or '(none)'}"
-                ),
-                max_tokens=4000,
-            )
+            issues = self.repo.get_issues(state="open", labels=[LABEL_NEEDS_REFINEMENT], sort="created", direction="asc")
+            for issue in issues:
+                labels = {label.name for label in issue.labels}
+                if not FORBIDDEN_LABELS.intersection(labels):
+                    return issue
+            return None
+        except GithubException as e:
+            log.error(f"Error finding issue to refine: {e}")
+            return None
 
-            if not self.cost.check_ceiling():
-                return []
-
-            # Parse JSON response
-            raw = response.text.strip()
-            # Strip markdown fences if model adds them anyway
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1]
-            if raw.endswith("```"):
-                raw = raw.rsplit("```", 1)[0]
-            raw = raw.strip()
-
-            drafts = json.loads(raw)
-
-            # Log reasoning (not included in issues)
-            for d in drafts:
-                log.info(f"  💡 {d['title']} — {d.get('reasoning', 'no reason given')}")
-
-            created = self.github.create_draft_issues(drafts)
-            self.stats["brainstormed"] += len(created)
-            return created
-
-        except json.JSONDecodeError as e:
-            log.error(f"  ❌ Failed to parse brainstorm JSON: {e}")
-            log.error(f"  Raw response: {raw[:500]}")
-            self.stats["failed"] += 1
-            return []
-        except Exception as e:
-            log.error(f"  ❌ Brainstorm failed: {e}")
-            self.stats["failed"] += 1
-            return []
-
-    def run_once(self, force_brainstorm: bool = False) -> dict:
-        """Run a single pass of the agent loop."""
-        log.info("=" * 60)
-        log.info(f"🔄 FOREMAN pass @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
-
-        if not self.cost.check_ceiling():
-            log.warning("💤 Parked — cost ceiling reached")
-            return self.stats
-
-        # Check refinement queue
-        queue = self.github.get_refinement_queue()
-        log.info(f"📋 Refinement queue: {len(queue)} issues")
-
-        if queue and not force_brainstorm:
-            # REFINE MODE
-            for issue in queue:
-                self.refine_issue(issue)
-                if not self.cost.check_ceiling():
-                    break
-                time.sleep(2)  # Be nice to APIs
-        elif len(queue) < BRAINSTORM_THRESHOLD or force_brainstorm:
-            # BRAINSTORM MODE
-            log.info(f"  Queue ({len(queue)}) below threshold ({BRAINSTORM_THRESHOLD}) — brainstorming")
-            self.brainstorm()
-        else:
-            log.info("  Nothing to do, waiting...")
-
-        log.info(f"📊 Stats: {self.stats}")
-        log.info(f"💰 {self.cost.summary()}")
-        return self.stats
-
-    def run_loop(self):
-        """Run the agent in a continuous loop."""
-        log.info("🚀 FOREMAN agent starting")
-        log.info(f"   Repo: {REPO_NAME}")
-        log.info(f"   Poll interval: {POLL_INTERVAL_SEC}s")
-        log.info(f"   Brainstorm threshold: {BRAINSTORM_THRESHOLD}")
-        log.info(f"   Cost ceiling: ${COST_CEILING_USD:.2f}/session")
-        log.info(f"   Models: {self.router.summary()}")
-        log.info(f"   Dry run: {self.dry_run}")
-
+    def get_ready_issue_count(self):
+        """Get the count of open issues ready for implementation."""
         try:
-            while True:
-                self.run_once()
-                log.info(f"💤 Sleeping {POLL_INTERVAL_SEC}s...")
-                time.sleep(POLL_INTERVAL_SEC)
-        except KeyboardInterrupt:
-            log.info("\n🛑 FOREMAN stopped by user")
-            log.info(f"📊 Final stats: {self.stats}")
-            log.info(f"💰 {self.cost.summary()}")
-            self.cost.save_session()
+            return self.repo.get_issues(state="open", labels=[LABEL_READY]).totalCount
+        except GithubException as e:
+            log.error(f"Error getting ready issue count: {e}")
+            return 0
 
+    def create_issue(self, title: str, body: str, labels: list[str]):
+        """Create a new issue on GitHub."""
+        log.info(f"Creating issue '{title}' with labels {labels}")
+        if self.dry_run:
+            log.warning("DRY RUN: Issue creation skipped.")
+            # Return a mock object with an html_url for notification testing
+            class MockIssue:
+                number = 0
+                html_url = "https://github.com/mock/issue"
+                title = title
+            return MockIssue()
+        try:
+            return self.repo.create_issue(title=title, body=body, labels=labels)
+        except GithubException as e:
+            log.error(f"Error creating issue: {e}")
+            return None
 
-# ─── CLI ─────────────────────────────────────────────────────
+    def close_issue(self, issue, comment: str):
+        """Add a comment and close an issue."""
+        log.info(f"Closing issue #{issue.number} with comment.")
+        if self.dry_run:
+            log.warning("DRY RUN: Issue closing skipped.")
+            return
+        try:
+            if comment:
+                issue.create_comment(comment)
+            issue.edit(state="closed")
+        except GithubException as e:
+            log.error(f"Error closing issue #{issue.number}: {e}")
 
-def main():
-    parser = argparse.ArgumentParser(description="FOREMAN Seed Agent")
-    parser.add_argument("--once", action="store_true", help="Single pass then exit")
-    parser.add_argument("--brainstorm-only", action="store_true", help="Force brainstorm mode")
-    parser.add_argument("--dry-run", action="store_true", help="Log actions without touching GitHub")
-    parser.add_argument("--profile", default=None, help="Routing profile: cheap, balanced, quality")
-    args = parser.parse_args()
+    def add_labels(self, issue, labels: list[str]):
+        """Add labels to an existing issue."""
+        log.info(f"Adding labels {labels} to issue #{issue.number}")
+        if self.dry_run or issue.number == 0: # also check for mock issue
+            log.warning("DRY RUN: Adding labels skipped.")
+            return
+        try:
+            issue.add_to_labels(*labels)
+        except GithubException as e:
+            log.error(f"Error adding labels to issue #{issue.number}: {e}")
 
-    # Override routing profile from CLI if provided
-    global ROUTING_PROFILE
-    if args.profile:
-        ROUTING_PROFILE = args.profile
+def run_refine_pass(client: GitHubClient, llm: LLMClient, notifier: TelegramNotifier):
+    log.info("🕵️  Starting refine pass...")
+    try:
+        issue = client.find_issue_to_refine()
+        if not issue:
+            log.info("✅ No issues found to refine.")
+            return
 
-    # Validate config
-    if not GITHUB_TOKEN:
-        log.error("❌ GITHUB_TOKEN not set")
-        sys.exit(1)
-    if not REPO_NAME:
-        log.error("❌ FOREMAN_REPO not set (e.g. 'youruser/foreman')")
-        sys.exit(1)
+        log.info(f"Found issue to refine: #{issue.number} {issue.title}")
+        refined_spec_json = llm.refine_issue(issue.title, issue.body)
+        if not refined_spec_json:
+            log.error("LLM did not return a valid spec. Skipping.")
+            return
 
-    # API keys are validated lazily when a backend is first used.
-    # This means you only need keys for providers you actually route to.
-    # e.g. ROUTING_PROFILE=cheap with all-Gemini routing only needs GEMINI_API_KEY.
-
-    github = GitHubClient(GITHUB_TOKEN, REPO_NAME, dry_run=args.dry_run)
-    agent = ForemanAgent(github, dry_run=args.dry_run)
-
-    if args.once or args.brainstorm_only:
-        agent.run_once(force_brainstorm=args.brainstorm_only)
-    else:
-        agent.run_loop()
-
-
-if __name__ == "__main__":
-    main()
+        refined_spec = json.loads(refined_spec_json)
+        log.info(f"📝 LLM refined issue into: '{refined_spec['title']}'")
+        
+        new_issue = client.create_issue(
+            title=refined_spec['title'],
+            body=refined_spec['body'],
+            labels=[LABEL_AUTO_REFINED, LABEL_READY]
+        )
+        
+        if new_issue:
+            log.info(f"✅ Successfully created new refined issue #{new_issue.number}")
+            client.add_labels(issue, [LABEL_REFINED_OUT])
+            client.close_issue(issue, f"Refined into #{new_issue.number}")
+            
+            message = (
+                f"✅ *Issue Refined*\n\n"
+                f"*[#{new_issue.number} {new_issue.title}]({new_issue.html_url})*\n\n"
+                f"Original: `#{issue.number} {issue.title}`"
+            )
+            notifier.send_message(message, parse_mode="MarkdownV2")
+        
+    except json.JSONDecodeError as e:
+        log.error(f"Error decoding LLM response for refinement:
