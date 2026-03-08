@@ -1,0 +1,6 @@
+anthropic>=0.40.0
+PyGithub>=2.1.0
+
+# Optional providers — install only what you need:
+# pip install google-genai     # for Gemini
+# pip install openai           # for OpenAI, Groq, Together, Ollama, LM Studio
