@@ -2,19 +2,16 @@ name: Run Seed Agent
 
 on:
   schedule:
-    # Run hourly at 15 minutes past the hour
-    - cron: '15 * * * *'
-  workflow_dispatch:
+    - cron: '15 * * * *'  # Every hour at :15
+  workflow_dispatch:       # Manual trigger from GitHub UI
 
 jobs:
   run_agent:
     runs-on: ubuntu-latest
 
-    env:
-      POLL_INTERVAL: 0 # Not relevant for --once run
-      BRAINSTORM_THRESHOLD: 1 # Attempt brainstorming if less than this many ready issues
-      BRAINSTORM_MAX_DRAFTS: 3 # Max number of drafts to create in one run
-      FOREMAN_REPO: ${{ github.repository }} # Automatically set to owner/repo
+    permissions:
+      issues: write
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -23,17 +20,17 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          # Install OpenAI for the seed agent
-          pip install openai
+        run: pip install --quiet anthropic PyGithub google-genai
 
       - name: Run Seed Agent
         run: python seed_agent.py --once
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FOREMAN_REPO: ${{ secrets.FOREMAN_REPO }}
+          ROUTING_PROFILE: cheap
+          COST_CEILING_USD: "2.0"
+          BRAINSTORM_MAX_DRAFTS: "3"
