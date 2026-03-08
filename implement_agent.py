@@ -146,10 +146,11 @@ class GitHubClient:
             log.error(f"  Failed to get repo tree: {e}")
             return []
 
-    def get_file_contents(self, path: str) -> tuple:
+    def get_file_contents(self, path: str, branch: str = None) -> tuple:
         """Returns (content_str, sha) or (None, None) if not found."""
         try:
-            f = self.repo.get_contents(path)
+            kwargs = {"ref": branch} if branch else {}
+            f = self.repo.get_contents(path, **kwargs)
             return f.decoded_content.decode("utf-8"), f.sha
         except Exception:
             return None, None
@@ -336,10 +337,12 @@ class ImplementAgent:
                     if content:
                         context[ctx_path] = content
 
-                # Load existing content if modifying
-                existing_sha = None
+                # Check if file already exists on the branch (handles retries)
+                _, existing_sha = self.github.get_file_contents(file_spec["path"], branch=branch)
+
+                # Load existing content into context if modifying
                 if file_spec["action"] == "modify":
-                    existing_content, existing_sha = self.github.get_file_contents(file_spec["path"])
+                    existing_content, _ = self.github.get_file_contents(file_spec["path"], branch=branch)
                     if existing_content:
                         context[file_spec["path"]] = existing_content
 
