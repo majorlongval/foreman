@@ -34,6 +34,7 @@ MAX_FILES_PER_ISSUE = int(os.environ.get("MAX_FILES_PER_ISSUE", "10"))
 
 LABEL_READY = "ready"
 LABEL_IMPLEMENTING = "foreman-implementing"
+LABEL_READY_FOR_REVIEW = "ready-for-review"
 
 # ─── Logging ──────────────────────────────────────────────────
 
@@ -102,8 +103,9 @@ class GitHubClient:
     def _ensure_labels(self):
         existing = {l.name for l in self.repo.get_labels()}
         needed = {
-            LABEL_READY: "0075ca",            # blue
-            LABEL_IMPLEMENTING: "e4a100",     # orange — in progress
+            LABEL_READY: "0075ca",              # blue
+            LABEL_IMPLEMENTING: "e4a100",       # orange — in progress
+            LABEL_READY_FOR_REVIEW: "e99695",   # pink — PR opened
         }
         for name, color in needed.items():
             if name not in existing:
@@ -394,6 +396,9 @@ class ImplementAgent:
                 issue.create_comment(
                     f"🤖 FOREMAN opened PR #{pr.number}: {pr.html_url}"
                 )
+                issue.remove_from_labels(LABEL_READY)
+                issue.remove_from_labels(LABEL_IMPLEMENTING)
+                issue.add_to_labels(LABEL_READY_FOR_REVIEW)
 
             self.stats["implemented"] += 1
             log.info(f"  ✅ Done #{issue.number}")
