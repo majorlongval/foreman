@@ -63,6 +63,7 @@ log = logging.getLogger("foreman")
 
 from cost_monitor import CostTracker, CloudCostMonitor, create_cost_system
 from llm_client import LLMClient, ModelRouter
+from telegram_notifier import notify as tg
 
 
 # ─── Vision Loader ───────────────────────────────────────────
@@ -305,6 +306,7 @@ class ForemanAgent:
 
             self.github.create_refined_issue(issue, refined_body, refined_title)
             self.stats["refined"] += 1
+            tg(f"✅ Refined #{issue.number}: <b>{refined_title}</b>")
             return True
 
         except Exception as e:
@@ -365,6 +367,7 @@ class ForemanAgent:
 
             created = self.github.create_draft_issues(drafts)
             self.stats["brainstormed"] += len(created)
+            tg(f"🧠 Brainstormed {len(created)} new draft issues")
             return created
 
         except json.JSONDecodeError as e:
@@ -384,6 +387,7 @@ class ForemanAgent:
 
         if not self.cost.check_ceiling():
             log.warning("💤 Parked — cost ceiling reached")
+            tg(f"🚨 FOREMAN parked — cost ceiling ${COST_CEILING_USD:.2f} reached")
             return self.stats
 
         # Check refinement queue

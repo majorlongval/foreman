@@ -22,6 +22,7 @@ from github import Github, GithubException
 
 from cost_monitor import CostTracker
 from llm_client import LLMClient, ModelRouter
+from telegram_notifier import notify as tg
 
 # ─── Configuration ────────────────────────────────────────────
 
@@ -364,7 +365,7 @@ class ImplementAgent:
                     task="implement",
                     system=IMPLEMENT_SYSTEM,
                     message=self._build_implement_message(issue, plan, file_spec, context),
-                    max_tokens=16000,
+                    max_tokens=65536,
                 )
                 log.info(f"  Generated {len(impl_response.text or '')} chars for {file_spec['path']}")
                 if not self.cost.check_ceiling():
@@ -410,6 +411,7 @@ class ImplementAgent:
                 issue.remove_from_labels(LABEL_READY)
                 issue.remove_from_labels(LABEL_IMPLEMENTING)
                 issue.add_to_labels(LABEL_READY_FOR_REVIEW)
+                tg(f"🔨 PR opened for #{issue.number}: <b>{issue.title}</b>\n{pr.html_url}")
 
             self.stats["implemented"] += 1
             log.info(f"  ✅ Done #{issue.number}")
