@@ -106,6 +106,12 @@ def serialize_content(content) -> list[dict]:
                 "name": block.name,
                 "input": block.input,
             })
+        else:
+            # Preserve unknown block types (e.g. thinking) as-is
+            try:
+                serialized.append(block.model_dump())
+            except Exception:
+                log.warning(f"Skipping unknown content block type: {block.type}")
     return serialized
 
 
@@ -183,6 +189,8 @@ def process_message(user_message: str, chat_data: dict) -> str:
 
         # Check ceiling before next call
         if not _cost_tracker.check_ceiling():
+            # Roll back orphaned assistant+tool_result entries
+            del history[-2:]
             return (
                 "I was using tools but hit the cost ceiling mid-conversation. "
                 f"({_cost_tracker.summary()})"
@@ -197,6 +205,8 @@ def process_message(user_message: str, chat_data: dict) -> str:
                 messages=history,
             )
         except Exception as e:
+            # Roll back orphaned assistant+tool_result entries
+            del history[-2:]
             log.error(f"Anthropic API error during tool loop: {e}")
             return f"Claude API error during tool use: {e}"
 
@@ -219,7 +229,9 @@ def process_message(user_message: str, chat_data: dict) -> str:
     return final_text
 
 
-# ─── Telegram Security ───────────────────────────────────────
+# ─── Telegram Security & Concurrency ────────────────────────
+
+_chat_locks: dict[int, asyncio.Lock] = {}
 
 
 def is_allowed(chat_id: int) -> bool:
@@ -301,7 +313,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_chat_action(ChatAction.TYPING)
     try:
         repo = get_github_repo(repo_name)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         status = await loop.run_in_executor(None, _get_project_status, repo)
     except Exception as e:
         status = f"Error getting status: {e}"
@@ -325,19 +337,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    await update.message.reply_chat_action(ChatAction.TYPING)
+    # Serialize per-chat to avoid concurrent mutation of chat_data
+    chat_id = update.effective_chat.id
+    lock = _chat_locks.setdefault(chat_id, asyncio.Lock())
 
-    try:
-        loop = asyncio.get_event_loop()
-        reply = await loop.run_in_executor(
-            None, process_message, update.message.text, context.chat_data,
-        )
-    except Exception as e:
-        log.error(f"process_message failed: {e}", exc_info=True)
-        reply = f"Something went wrong: {e}"
+    async with lock:
+        await update.message.reply_chat_action(ChatAction.TYPING)
 
-    for chunk in _split_message(reply):
-        await update.message.reply_text(chunk)
+        try:
+            loop = asyncio.get_running_loop()
+            reply = await loop.run_in_executor(
+                None, process_message, update.message.text, context.chat_data,
+            )
+        except Exception as e:
+            log.error(f"process_message failed: {e}", exc_info=True)
+            reply = f"Something went wrong: {e}"
+
+        for chunk in _split_message(reply):
+            await update.message.reply_text(chunk)
 
 
 # ─── Helpers ─────────────────────────────────────────────────
