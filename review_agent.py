@@ -176,7 +176,7 @@ class PRReviewer:
                     f"**Changed files:** {', '.join(files)}\n\n"
                     f"**Diff:**\n```\n{diff}\n```"
                 ),
-                max_tokens=3000,
+                max_tokens=8000,
             )
             self.cost.record(model, response, agent="review", action="review")
 
@@ -184,6 +184,10 @@ class PRReviewer:
                 return False
 
             review_body = response.text
+            if not review_body or not review_body.strip():
+                log.error(f"  ❌ Empty review response — skipping PR #{pr.number}")
+                self.stats["failed"] += 1
+                return False
 
             # Determine review event type from verdict
             event = "COMMENT"  # default
