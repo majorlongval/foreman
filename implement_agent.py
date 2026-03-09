@@ -73,6 +73,9 @@ Rules:
 - For "modify" actions, include the file path in relevant_context_paths too
 - Maximum 10 files per plan — only what directly implements the acceptance criteria
 - No test files unless explicitly required by acceptance criteria
+- NEVER rewrite an existing file entirely if you only need to add a few lines — use "modify" and describe the minimal change needed
+- NEVER touch files unrelated to the acceptance criteria
+- Prefer creating new files over modifying large existing ones
 - No markdown fences. Pure JSON only."""
 
 IMPLEMENT_SYSTEM = """You are FOREMAN, an autonomous code implementation agent.
@@ -179,6 +182,13 @@ class GitHubClient:
             return
         if len(content) > 900_000:
             raise ValueError(f"Generated content too large for {path}: {len(content)} bytes")
+        # Syntax check Python files before committing
+        if path.endswith(".py"):
+            import ast
+            try:
+                ast.parse(content)
+            except SyntaxError as e:
+                raise ValueError(f"Syntax error in generated {path}: {e}")
         try:
             if existing_sha:
                 self.repo.update_file(path, message, content, existing_sha, branch=branch)
@@ -353,7 +363,7 @@ class ImplementAgent:
                     task="implement",
                     system=IMPLEMENT_SYSTEM,
                     message=self._build_implement_message(issue, plan, file_spec, context),
-                    max_tokens=8000,
+                    max_tokens=16000,
                 )
                 log.info(f"  Generated {len(impl_response.text or '')} chars for {file_spec['path']}")
                 if not self.cost.check_ceiling():
