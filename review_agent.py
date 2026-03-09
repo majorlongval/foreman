@@ -34,7 +34,7 @@ POLL_INTERVAL_SEC = int(os.environ.get("REVIEW_POLL_INTERVAL", "120"))
 COST_CEILING_USD = float(os.environ.get("COST_CEILING_USD", "5.0"))
 
 # Label applied after review so we don't review twice
-LABEL_REVIEWED = "foreman-reviewed"
+LABEL_REVIEWED = "reviewed"
 # Label for PRs that should be skipped
 LABEL_SKIP_REVIEW = "skip-review"
 
