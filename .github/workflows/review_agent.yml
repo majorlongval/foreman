@@ -1,0 +1,36 @@
+name: Review PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize]  # Trigger on new PRs and updates
+  workflow_dispatch:               # Manual trigger
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install --quiet anthropic PyGithub google-genai
+
+      - name: Run Review Agent
+        run: python review_agent.py --once
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FOREMAN_REPO: ${{ secrets.FOREMAN_REPO }}
+          ROUTING_PROFILE: cheap
+          COST_CEILING_USD: "1.0"

@@ -20,17 +20,17 @@ import logging
 import argparse
 from datetime import datetime, timezone
 
-import anthropic
 from github import Github, GithubException
+from llm_client import LLMClient, ModelRouter
+from cost_monitor import CostTracker
 
 # ─── Configuration ────────────────────────────────────────────
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 REPO_NAME = os.environ.get("FOREMAN_REPO", "")
+ROUTING_PROFILE = os.environ.get("ROUTING_PROFILE", "balanced")
 
 POLL_INTERVAL_SEC = int(os.environ.get("REVIEW_POLL_INTERVAL", "120"))
-MODEL_REVIEW = os.environ.get("MODEL_REVIEW", "claude-sonnet-4-20250514")
 COST_CEILING_USD = float(os.environ.get("COST_CEILING_USD", "5.0"))
 
 # Label applied after review so we don't review twice
@@ -49,36 +49,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("foreman-reviewer")
 
-# ─── Cost Tracking (shared pattern with seed_agent) ──────────
-
-class CostTracker:
-    PRICING = {
-        "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
-        "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
-        "claude-opus-4-20250514": {"input": 15.0, "output": 75.0},
-    }
-
-    def __init__(self, ceiling_usd: float):
-        self.ceiling = ceiling_usd
-        self.total_cost = 0.0
-        self.calls = 0
-
-    def record(self, model: str, usage) -> float:
-        pricing = self.PRICING.get(model, {"input": 3.0, "output": 15.0})
-        cost = (usage.input_tokens * pricing["input"] + usage.output_tokens * pricing["output"]) / 1_000_000
-        self.total_cost += cost
-        self.calls += 1
-        log.info(f"  💰 ${cost:.4f} | Session: ${self.total_cost:.4f} / ${self.ceiling:.2f}")
-        return cost
-
-    def check_ceiling(self) -> bool:
-        if self.total_cost >= self.ceiling:
-            log.warning(f"🚨 COST CEILING: ${self.total_cost:.4f} >= ${self.ceiling:.2f}")
-            return False
-        return True
-
-    def summary(self) -> str:
-        return f"Session: {self.calls} calls, ${self.total_cost:.4f}"
 
 
 # ─── Review Prompts ──────────────────────────────────────────
@@ -138,13 +108,15 @@ Rules:
 
 class PRReviewer:
     def __init__(self, token: str, repo_name: str, dry_run: bool = False):
-        self.gh = Github(token)
+        self.gh = Github(auth=__import__("github").Auth.Token(token))
         self.repo = self.gh.get_repo(repo_name)
-        self.claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        self.cost = CostTracker(COST_CEILING_USD)
+        self.llm = LLMClient()
+        self.router = ModelRouter(ROUTING_PROFILE)
+        self.cost = CostTracker(ceiling_usd=COST_CEILING_USD)
         self.dry_run = dry_run
         self.stats = {"reviewed": 0, "skipped": 0, "failed": 0}
         self._ensure_labels()
+        log.info(f"\n{self.router.summary()}\n")
 
     def _ensure_labels(self):
         existing = {l.name for l in self.repo.get_labels()}
@@ -194,26 +166,24 @@ class PRReviewer:
                 diff = diff[:MAX_DIFF_CHARS] + f"\n\n... [TRUNCATED — {len(diff)} chars total, showing first {MAX_DIFF_CHARS}]"
                 log.warning(f"  ⚠️ Diff truncated from {len(diff)} chars")
 
-            response = self.claude.messages.create(
-                model=MODEL_REVIEW,
-                max_tokens=3000,
+            model = self.router.get("review")
+            response = self.llm.complete(
+                model=model,
                 system=REVIEW_SYSTEM,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"## PR #{pr.number}: {pr.title}\n\n"
-                        f"**Description:**\n{pr.body or '(no description)'}\n\n"
-                        f"**Changed files:** {', '.join(files)}\n\n"
-                        f"**Diff:**\n```\n{diff}\n```"
-                    ),
-                }],
+                message=(
+                    f"## PR #{pr.number}: {pr.title}\n\n"
+                    f"**Description:**\n{pr.body or '(no description)'}\n\n"
+                    f"**Changed files:** {', '.join(files)}\n\n"
+                    f"**Diff:**\n```\n{diff}\n```"
+                ),
+                max_tokens=3000,
             )
-            self.cost.record(MODEL_REVIEW, response.usage)
+            self.cost.record(model, response, agent="review", action="review")
 
             if not self.cost.check_ceiling():
                 return False
 
-            review_body = response.content[0].text
+            review_body = response.text
 
             # Determine review event type from verdict
             event = "COMMENT"  # default
@@ -295,7 +265,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    for var in ["GITHUB_TOKEN", "ANTHROPIC_API_KEY", "FOREMAN_REPO"]:
+    for var in ["GITHUB_TOKEN", "FOREMAN_REPO"]:
         if not os.environ.get(var):
             log.error(f"❌ {var} not set")
             sys.exit(1)
