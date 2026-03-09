@@ -61,7 +61,10 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "label_issue",
-        "description": "Add a label to a GitHub issue or pull request.",
+        "description": (
+            "Add a label to an issue. Use 'ready' to trigger the implement agent. "
+            "Use 'needs-refinement' to queue it for the seed agent."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
