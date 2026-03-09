@@ -161,19 +161,20 @@ class GitHubClient:
             return None, None
 
     def ensure_branch(self, branch_name: str):
-        """Create branch from main HEAD. No-op if already exists."""
+        """Create branch from main HEAD. Deletes and recreates if already exists."""
         if self.dry_run:
             log.info(f"  [DRY RUN] Would create branch: {branch_name}")
             return
+        sha = self.repo.get_branch("main").commit.sha
+        # Delete existing branch first to ensure a clean slate on retry
         try:
-            sha = self.repo.get_branch("main").commit.sha
-            self.repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=sha)
-            log.info(f"  Created branch: {branch_name}")
-        except GithubException as e:
-            if e.status == 422:
-                log.info(f"  Branch already exists: {branch_name}")
-            else:
-                raise
+            self.repo.get_git_ref(f"heads/{branch_name}")
+            self.repo.get_git_ref(f"heads/{branch_name}").delete()
+            log.info(f"  Deleted stale branch: {branch_name}")
+        except GithubException:
+            pass  # Branch doesn't exist, that's fine
+        self.repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=sha)
+        log.info(f"  Created branch: {branch_name}")
 
     def commit_file(self, branch: str, path: str, content: str, message: str, existing_sha: str = None):
         """Create or update a file on the given branch."""
