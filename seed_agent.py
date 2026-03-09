@@ -23,6 +23,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from github import Github, GithubException
+from github.Issue import Issue
 
 # ─── Configuration ────────────────────────────────────────────
 
@@ -89,130 +90,43 @@ def load_vision() -> str:
 
 class GitHubClient:
     def __init__(self, token: str, repo_name: str, dry_run: bool = False):
-        self.gh = Github(token)
-        self.repo = self.gh.get_repo(repo_name)
+        if not token or not repo_name:
+            log.error("❌ GITHUB_TOKEN and FOREMAN_REPO must be set.")
+            sys.exit(1)
+        self.g = Github(token)
+        self.repo = self.g.get_repo(repo_name)
         self.dry_run = dry_run
-        self._ensure_labels()
-
-    def _ensure_labels(self):
-        """Ensure all required labels exist in the repo."""
-        required_labels = [
-            (LABEL_NEEDS_REFINEMENT, "b1e100", "Issue needs to be broken down into a detailed spec"),
-            (LABEL_AUTO_REFINED, "0E8A16", "Issue was automatically refined by the agent"),
-            (LABEL_REFINED_OUT, "D93F0B", "Original issue that was refined into a new one"),
-            (LABEL_DRAFT, "fbca04", "A draft idea, not ready for implementation"),
-            (LABEL_READY, "1d76db", "Ready for implementation"),
-            (LABEL_IMPLEMENTING, "8474A4", "Currently being implemented by an agent"),
-        ]
+        log.info(f"🛠️ GitHub client initialized for repo '{repo_name}'")
         if self.dry_run:
-            return
-        
-        try:
-            existing_labels = {label.name for label in self.repo.get_labels()}
-            for name, color, description in required_labels:
-                if name not in existing_labels:
-                    log.info(f"Creating label '{name}'")
-                    self.repo.create_label(name, color, description)
-        except GithubException as e:
-            log.error(f"Error ensuring labels: {e}. Check repo permissions.")
-            raise
+            log.warning("🌵 Dry run mode enabled. No changes will be made to GitHub.")
 
-    def find_issue_to_refine(self):
-        """Find the oldest open issue with 'needs-refinement' label."""
+    def find_issues(self, labels: list[str], state: str = "open", exclude_labels: set[str] | None = None) -> list[Issue]:
+        """Find issues with a given set of labels, excluding others."""
         try:
-            issues = self.repo.get_issues(state="open", labels=[LABEL_NEEDS_REFINEMENT], sort="created", direction="asc")
+            issues = self.repo.get_issues(state=state, labels=labels)
+            filtered_issues = []
             for issue in issues:
-                labels = {label.name for label in issue.labels}
-                if not FORBIDDEN_LABELS.intersection(labels):
-                    return issue
-            return None
+                issue_labels = {label.name for label in issue.labels}
+                if exclude_labels and not issue_labels.isdisjoint(exclude_labels):
+                    continue
+                filtered_issues.append(issue)
+            return list(filtered_issues)
         except GithubException as e:
-            log.error(f"Error finding issue to refine: {e}")
-            return None
+            log.error(f"GitHub API error while finding issues: {e}")
+            return []
 
-    def get_ready_issue_count(self):
-        """Get the count of open issues ready for implementation."""
-        try:
-            return self.repo.get_issues(state="open", labels=[LABEL_READY]).totalCount
-        except GithubException as e:
-            log.error(f"Error getting ready issue count: {e}")
-            return 0
-
-    def create_issue(self, title: str, body: str, labels: list[str]):
-        """Create a new issue on GitHub."""
-        log.info(f"Creating issue '{title}' with labels {labels}")
+    def create_issue(self, title: str, body: str, labels: list[str]) -> Issue | None:
+        """Create a new issue."""
+        log.info(f"Creating issue: '{title}' with labels: {labels}")
         if self.dry_run:
-            log.warning("DRY RUN: Issue creation skipped.")
-            # Return a mock object with an html_url for notification testing
+            log.info("[DRY RUN] Would create issue.")
+            # Return a mock object that has a `number` and `html_url` for logging
             class MockIssue:
                 number = 0
                 html_url = "https://github.com/mock/issue"
                 title = title
+                def edit(self, *args, **kwargs): pass
+                def create_comment(self, *args, **kwargs): pass
             return MockIssue()
         try:
-            return self.repo.create_issue(title=title, body=body, labels=labels)
-        except GithubException as e:
-            log.error(f"Error creating issue: {e}")
-            return None
-
-    def close_issue(self, issue, comment: str):
-        """Add a comment and close an issue."""
-        log.info(f"Closing issue #{issue.number} with comment.")
-        if self.dry_run:
-            log.warning("DRY RUN: Issue closing skipped.")
-            return
-        try:
-            if comment:
-                issue.create_comment(comment)
-            issue.edit(state="closed")
-        except GithubException as e:
-            log.error(f"Error closing issue #{issue.number}: {e}")
-
-    def add_labels(self, issue, labels: list[str]):
-        """Add labels to an existing issue."""
-        log.info(f"Adding labels {labels} to issue #{issue.number}")
-        if self.dry_run or issue.number == 0: # also check for mock issue
-            log.warning("DRY RUN: Adding labels skipped.")
-            return
-        try:
-            issue.add_to_labels(*labels)
-        except GithubException as e:
-            log.error(f"Error adding labels to issue #{issue.number}: {e}")
-
-def run_refine_pass(client: GitHubClient, llm: LLMClient, notifier: TelegramNotifier):
-    log.info("🕵️  Starting refine pass...")
-    try:
-        issue = client.find_issue_to_refine()
-        if not issue:
-            log.info("✅ No issues found to refine.")
-            return
-
-        log.info(f"Found issue to refine: #{issue.number} {issue.title}")
-        refined_spec_json = llm.refine_issue(issue.title, issue.body)
-        if not refined_spec_json:
-            log.error("LLM did not return a valid spec. Skipping.")
-            return
-
-        refined_spec = json.loads(refined_spec_json)
-        log.info(f"📝 LLM refined issue into: '{refined_spec['title']}'")
-        
-        new_issue = client.create_issue(
-            title=refined_spec['title'],
-            body=refined_spec['body'],
-            labels=[LABEL_AUTO_REFINED, LABEL_READY]
-        )
-        
-        if new_issue:
-            log.info(f"✅ Successfully created new refined issue #{new_issue.number}")
-            client.add_labels(issue, [LABEL_REFINED_OUT])
-            client.close_issue(issue, f"Refined into #{new_issue.number}")
-            
-            message = (
-                f"✅ *Issue Refined*\n\n"
-                f"*[#{new_issue.number} {new_issue.title}]({new_issue.html_url})*\n\n"
-                f"Original: `#{issue.number} {issue.title}`"
-            )
-            notifier.send_message(message, parse_mode="MarkdownV2")
-        
-    except json.JSONDecodeError as e:
-        log.error(f"Error decoding LLM response for refinement:
+            return self.repo.create_issue(title
