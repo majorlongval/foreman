@@ -190,13 +190,12 @@ class PRReviewer:
                 return False
 
             # Determine review event type from verdict
-            event = "COMMENT"  # default
+            # Never use REQUEST_CHANGES — GitHub blocks it when reviewer == PR author
+            event = "COMMENT"
             verdict_lower = review_body.lower()
             if "verdict" in verdict_lower:
                 if "approve" in verdict_lower.split("verdict")[-1][:100]:
                     event = "APPROVE"
-                elif "request_changes" in verdict_lower.split("verdict")[-1][:100]:
-                    event = "REQUEST_CHANGES"
 
             if self.dry_run:
                 log.info(f"  [DRY RUN] Would post {event} review on PR #{pr.number}")
