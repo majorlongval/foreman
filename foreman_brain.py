@@ -19,7 +19,7 @@ import argparse
 import anthropic
 from github import Github
 
-from brain_tools import TOOL_SCHEMAS, execute_tool, _get_project_status
+from brain_tools import TOOL_SCHEMAS, execute_tool, get_project_status
 from cost_monitor import CostTracker
 
 # ─── Configuration ────────────────────────────────────────────
@@ -35,6 +35,11 @@ ALLOWED_CHAT_IDS = os.environ.get("ALLOWED_CHAT_IDS", "")  # comma-separated, em
 
 # ─── Logging ──────────────────────────────────────────────────
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
 log = logging.getLogger("foreman.brain")
 
 # ─── Cost Tracking ────────────────────────────────────────────
@@ -314,7 +319,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         repo = get_github_repo(repo_name)
         loop = asyncio.get_running_loop()
-        status = await loop.run_in_executor(None, _get_project_status, repo)
+        status = await loop.run_in_executor(None, get_project_status, repo)
     except Exception as e:
         status = f"Error getting status: {e}"
 

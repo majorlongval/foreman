@@ -161,7 +161,7 @@ _LABEL_ORDER = [
 ]
 
 
-def _get_project_status(repo):
+def get_project_status(repo):
     """Summarize open issues grouped by label + open PRs."""
     try:
         issues = list(repo.get_issues(state="open"))
@@ -399,7 +399,7 @@ def _get_repo_tree(repo):
 # ─── Dispatcher ──────────────────────────────────────────────
 
 _TOOL_FUNCTIONS = {
-    "get_project_status": lambda repo, tool_input: _get_project_status(repo),
+    "get_project_status": lambda repo, tool_input: get_project_status(repo),
     "get_issue": lambda repo, tool_input: _get_issue(repo, tool_input["number"]),
     "get_pr": lambda repo, tool_input: _get_pr(repo, tool_input["number"]),
     "label_issue": lambda repo, tool_input: _label_issue(repo, tool_input["number"], tool_input["label"]),
