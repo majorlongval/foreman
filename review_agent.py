@@ -276,7 +276,10 @@ class PRReviewer:
             self.cost.record(model_pass1, response1, agent="review", action="review_pass1")
             if not self.cost.check_ceiling(): return False
             review_body_1 = response1.text
-            if not review_body_1: return False
+            if not review_body_1 or not review_body_1.strip():
+                log.error(f"  ❌ Empty review response from pass 1 — skipping PR #{pr.number}")
+                self.stats["failed"] += 1
+                return False
             review_data_1 = self._parse_review_data(review_body_1)
             if review_data_1["critical_count"] > 0 or review_data_1["important_count"] > 0:
                 if not self.dry_run:
@@ -288,7 +291,10 @@ class PRReviewer:
             self.cost.record(model_pass2, response2, agent="review", action="review_pass2")
             if not self.cost.check_ceiling(): return False
             review_body_2 = response2.text
-            if not review_body_2: return False
+            if not review_body_2 or not review_body_2.strip():
+                log.error(f"  ❌ Empty review response from pass 2 — skipping PR #{pr.number}")
+                self.stats["failed"] += 1
+                return False
             review_data_2 = self._parse_review_data(review_body_2)
             if review_data_2["critical_count"] > 0 or review_data_2["important_count"] > 0:
                 if not self.dry_run:
