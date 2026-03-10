@@ -18,13 +18,13 @@ import threading
 import time
 from functools import wraps
 
-from agent_state import get_state, set_state, AgentState
+from agent_state import agent_state_manager, AgentState
 
 log = logging.getLogger("foreman.telegram")
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") # Used for general notifications
-TELEGRAM_AUTHORIZED_USERS = [user.strip() for user in os.environ.get("TELEGRAM_AUTHORIZED_USERS", "").split(",") if user.strip()]
+TELEGRAM_AUTHORIZED_USERS = [user.strip() for user in os.environ.get("AUTHORIZED_TELEGRAM_USER_IDS", "").split(",") if user.strip()]
 
 def notify(message: str) -> bool:
     """Send a Telegram message. Returns True on success, False if not configured or failed."""
@@ -98,21 +98,21 @@ def _handle_start(update):
 @authorized
 def _handle_status(update):
     chat_id = update["message"]["chat"]["id"]
-    state = get_state()
+    state = agent_state_manager.get_state()
     _send_reply(chat_id, f"Agent status: {state.name}")
 
 @authorized
 def _handle_pause(update):
     chat_id = update["message"]["chat"]["id"]
     log.info("  ⏸️ Pause command received via Telegram.")
-    set_state(AgentState.PAUSED)
+    agent_state_manager.set_state(AgentState.PAUSED)
     _send_reply(chat_id, "Agent loop paused.")
 
 @authorized
 def _handle_resume(update):
     chat_id = update["message"]["chat"]["id"]
     log.info("  ▶️ Resume command received via Telegram.")
-    set_state(AgentState.RUNNING)
+    agent_state_manager.set_state(AgentState.RUNNING)
     _send_reply(chat_id, "Agent loop resumed.")
 
 COMMANDS = {
@@ -159,7 +159,7 @@ def start_telegram_bot_polling():
         log.info("  📱 Telegram bot token not configured, command polling disabled.")
         return
     if not TELEGRAM_AUTHORIZED_USERS:
-        log.warning("  📱 TELEGRAM_AUTHORIZED_USERS not set. No one can issue commands.")
+        log.warning("  📱 AUTHORIZED_TELEGRAM_USER_IDS not set. No one can issue commands.")
         return
 
     log.info("  📱 Starting Telegram bot command listener...")
