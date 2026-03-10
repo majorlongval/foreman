@@ -35,7 +35,6 @@ BRAIN_MAX_TOKENS = int(os.environ.get("BRAIN_MAX_TOKENS", "4096"))
 BRAIN_COST_CEILING = float(os.environ.get("BRAIN_COST_CEILING", "1.0"))
 ALLOWED_CHAT_IDS = os.environ.get("ALLOWED_CHAT_IDS", "")  # comma-separated, empty = allow all
 SIMILARITY_THRESHOLD = float(os.environ.get("SIMILARITY_THRESHOLD", "0.9"))
-EMBEDDING_MODEL = "voyage-2" # Anthropic-compatible embedding model via Voyage, or use Voyage directly
 
 # ─── Logging ──────────────────────────────────────────────────
 
@@ -234,7 +233,7 @@ def process_message(user_message: str, chat_data: dict) -> str:
             response = client.messages.create(
                 model=BRAIN_MODEL,
                 max_tokens=BRAIN_MAX_TOKENS,
-                system=system,
+            system=system,
                 tools=TOOL_SCHEMAS,
                 messages=history,
             )
