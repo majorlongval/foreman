@@ -15,18 +15,11 @@ class AgentState(Enum):
 class AgentStateManager:
     """
     Manages the agent's operational state in a thread-safe manner.
-    This is a singleton class to ensure a single source of truth for the agent's state.
     """
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super(AgentStateManager, cls).__new__(cls)
-                cls._instance._state = AgentState.IDLE
-                logger.info("AgentStateManager initialized. Initial state: %s", cls._instance._state.name)
-        return cls._instance
+    def __init__(self):
+        self._state = AgentState.IDLE
+        self._lock = threading.Lock()
+        logger.info("AgentStateManager initialized. Initial state: %s", self._state.name)
 
     def get_state(self) -> AgentState:
         """Returns the current state of the agent."""
