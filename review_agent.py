@@ -63,13 +63,34 @@ logging.basicConfig(
 log = logging.getLogger("foreman-reviewer")
 
 
+def get_coding_standards() -> str:
+    """Read the STANDARDS.md file from the repository root."""
+    try:
+        standards_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "STANDARDS.md")
+        if os.path.exists(standards_path):
+            with open(standards_path, "r") as f:
+                content = f.read()
+            log.info("Successfully loaded STANDARDS.md")
+            return content
+        log.warning("STANDARDS.md not found at project root")
+        return "No specific coding standards provided."
+    except Exception as e:
+        log.error(f"Error reading STANDARDS.md: {e}")
+        return "Error loading coding standards."
+
 
 # ─── Review Prompts ──────────────────────────────────────────
 
-REVIEW_SYSTEM = """You are FOREMAN's code reviewer. You review pull requests for a self-improving
+REVIEW_SYSTEM_TEMPLATE = """You are FOREMAN's code reviewer. You review pull requests for a self-improving
 autonomous agent system built in Python. This is a self-modifying system — code changes
 run UNATTENDED in production. Your review gates auto-merge, so only report HIGH CONFIDENCE issues.
 
+### Coding Standards
+You MUST enforce the following standards. When suggesting changes, explicitly cite the rule name or section from these standards:
+
+{coding_standards}
+
+### Instructions
 You will receive:
 1. The PR title and description
 2. The full diff
@@ -78,6 +99,7 @@ You will receive:
 Your job is to provide a thorough but concise code review. Focus on:
 
 **Critical (must fix before merge):**
+- Violations of safety or autonomous operation rules in STANDARDS.md
 - Bugs, logic errors, or race conditions
 - Security issues (exposed secrets, injection risks)
 - Infinite loop risks (especially important — this is a self-modifying system)
@@ -85,12 +107,14 @@ Your job is to provide a thorough but concise code review. Focus on:
 - Cost control issues (unbounded API calls, missing cost checks)
 
 **Important (should fix):**
+- Non-compliance with SOLID or DRY principles as defined in STANDARDS.md
 - Missing safety rails or guard clauses
 - Poor error messages that would make debugging hard in autonomous mode
 - Hardcoded values that should be configurable
 - Missing logging (the agent runs unattended, logs are critical)
 
 **Suggestions (nice to have):**
+- Minor style deviations from STANDARDS.md
 - Code clarity and naming
 - Performance improvements
 - Test coverage gaps
@@ -106,7 +130,7 @@ One paragraph overall assessment. Is this PR safe to merge? What's the risk leve
 
 ## Issues
 For each issue found:
-- **[CRITICAL/IMPORTANT/SUGGESTION]** `filename:line_range` — Description of the issue.
+- **[CRITICAL/IMPORTANT/SUGGESTION]** `filename:line_range` — Description of the issue. **Cite specific rule from STANDARDS.md.**
   **Suggested fix:**
   ```python
   # exact replacement code here
@@ -120,13 +144,13 @@ With a one-line justification.
 
 ## Review Data
 ```json
-{
+{{
   "verdict": "APPROVE|REQUEST_CHANGES|COMMENT",
   "critical_count": 0,
   "important_count": 0,
   "suggestion_count": 0,
   "affected_files": ["file1.py", "file2.py"]
-}
+}}
 ```
 
 Rules:
@@ -363,13 +387,17 @@ class PRReviewer:
                 log.warning(f"  ⚠️ Diff truncated from {original_len} chars")
 
             review_message = self._build_review_message(pr, diff, files, prior_reviews=prior_reviews)
+            
+            # Load standards for this specific review run
+            standards = get_coding_standards()
+            system_prompt = REVIEW_SYSTEM_TEMPLATE.format(coding_standards=standards)
 
             # ── Pass 1: cheap/standard review ──
             model_pass1 = self.router.get("review")
             log.info(f"  Pass 1: {model_pass1}")
             response1 = self.llm.complete(
                 model=model_pass1,
-                system=REVIEW_SYSTEM,
+                system=system_prompt,
                 message=review_message,
             )
             self.cost.record(model_pass1, response1, agent="review", action="review_pass1")
@@ -408,7 +436,7 @@ class PRReviewer:
             log.info(f"  Pass 2 (confirmation): {model_pass2}")
             response2 = self.llm.complete(
                 model=model_pass2,
-                system=REVIEW_SYSTEM,
+                system=system_prompt,
                 message=review_message,
             )
             self.cost.record(model_pass2, response2, agent="review", action="review_pass2")
@@ -490,7 +518,10 @@ class PRReviewer:
         log.info(f"📋 PR review queue: {len(queue)} PRs")
 
         for pr in queue:
-            self.review_pr(pr)
+            try:
+                self.review_pr(pr)
+            except Exception as e:
+                log.error(f"Unexpected error in PR loop for #{pr.number}: {e}")
             if not self.cost.check_ceiling():
                 break
             time.sleep(5)  # Be nice
@@ -508,7 +539,10 @@ class PRReviewer:
 
         try:
             while True:
-                self.run_once()
+                try:
+                    self.run_once()
+                except Exception as e:
+                    log.error(f"Error in review loop: {e}")
                 log.info(f"💤 Sleeping {POLL_INTERVAL_SEC}s...")
                 time.sleep(POLL_INTERVAL_SEC)
         except KeyboardInterrupt:
