@@ -15,6 +15,7 @@ import sys
 import asyncio
 import logging
 import argparse
+import math
 
 import anthropic
 from github import Github
@@ -32,6 +33,7 @@ BRAIN_MODEL = os.environ.get("BRAIN_MODEL", "claude-sonnet-4-6")
 BRAIN_MAX_TOKENS = int(os.environ.get("BRAIN_MAX_TOKENS", "4096"))
 BRAIN_COST_CEILING = float(os.environ.get("BRAIN_COST_CEILING", "1.0"))
 ALLOWED_CHAT_IDS = os.environ.get("ALLOWED_CHAT_IDS", "")  # comma-separated, empty = allow all
+SIMILARITY_THRESHOLD = float(os.environ.get("SIMILARITY_THRESHOLD", "0.9"))
 
 # ─── Logging ──────────────────────────────────────────────────
 
@@ -64,6 +66,60 @@ def get_github_repo(repo_name: str):
     if repo_name not in _repo_cache:
         _repo_cache[repo_name] = _get_github().get_repo(repo_name)
     return _repo_cache[repo_name]
+
+
+# ─── Semantic Duplicate Check ────────────────────────────────
+
+def _get_embedding(text: str) -> list[float]:
+    """Generate embedding for text using OpenAI API (standard choice for embeddings)."""
+    # Note: Anthropic doesn't have an embedding API. We'll use OpenAI if available, 
+    # or a mock for similarity if not configured, though the plan implies using the 'configured LLM API'.
+    # For FOREMAN, we assume an OpenAI client is used for embeddings as is common.
+    import openai
+    client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    response = client.embeddings.create(
+        input=[text.replace("\n", " ")],
+        model="text-embedding-3-small"
+    )
+    return response.data[0].embedding
+
+
+def _cosine_similarity(v1: list[float], v2: list[float]) -> float:
+    dot_product = sum(a * b for a, b in zip(v1, v2))
+    magnitude1 = math.sqrt(sum(a * a for a in v1))
+    magnitude2 = math.sqrt(sum(b * b for b in v2))
+    if not magnitude1 or not magnitude2:
+        return 0.0
+    return dot_product / (magnitude1 * magnitude2)
+
+
+def is_duplicate_issue(repo, title: str, body: str) -> tuple[bool, str]:
+    """Check if proposed issue is semantically similar to any open issue."""
+    try:
+        if not os.environ.get("OPENAI_API_KEY"):
+            log.warning("OPENAI_API_KEY not set, skipping semantic duplicate check")
+            return False, ""
+
+        new_content = f"{title}\n{body}"
+        new_emb = _get_embedding(new_content)
+
+        open_issues = repo.get_issues(state="open")
+        for issue in open_issues:
+            if issue.pull_request:
+                continue
+            
+            existing_content = f"{issue.title}\n{issue.body or ''}"
+            existing_emb = _get_embedding(existing_content)
+            
+            similarity = _cosine_similarity(new_emb, existing_emb)
+            if similarity > SIMILARITY_THRESHOLD:
+                log.info(f"Duplicate detected: '{title}' is {similarity:.2f} similar to #{issue.number}")
+                return True, f"Issue #{issue.number}"
+        
+        return False, ""
+    except Exception as e:
+        log.error(f"Error in is_duplicate_issue: {e}")
+        return False, ""
 
 
 # ─── System Prompt ────────────────────────────────────────────
@@ -183,7 +239,20 @@ def process_message(user_message: str, chat_data: dict) -> str:
         for block in response.content:
             if block.type == "tool_use":
                 log.info(f"Tool call: {block.name}")
-                result = execute_tool(block.name, block.input, repo)
+                
+                # Check for semantic duplicates before creating an issue
+                if block.name == "create_issue":
+                    title = block.input.get("title", "")
+                    body = block.input.get("body", "")
+                    duplicate, similar_id = is_duplicate_issue(repo, title, body)
+                    if duplicate:
+                        log.info(f"Aborting creation of duplicate issue: '{title}' (Similar to {similar_id})")
+                        result = f"Aborted: This issue appears too similar to existing {similar_id}."
+                    else:
+                        result = execute_tool(block.name, block.input, repo)
+                else:
+                    result = execute_tool(block.name, block.input, repo)
+                
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -419,6 +488,7 @@ def main():
     log.info(f"  Max tokens: {BRAIN_MAX_TOKENS}")
     log.info(f"  Cost ceiling: ${BRAIN_COST_CEILING:.2f}")
     log.info(f"  Allowed chats: {ALLOWED_CHAT_IDS or '(all)'}")
+    log.info(f"  Similarity threshold: {SIMILARITY_THRESHOLD}")
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
