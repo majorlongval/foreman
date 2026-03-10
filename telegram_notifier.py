@@ -125,18 +125,27 @@ COMMANDS = {
 def _poll_updates():
     """Polls Telegram for new messages and handles commands."""
     last_update_id = 0
-    while True:
+    consecutive_failures = 0
+    max_failures = 10
+
+    while consecutive_failures < max_failures:
+        if not TELEGRAM_BOT_TOKEN:
+            log.error("  📱 Telegram bot token missing in polling loop. Exiting thread.")
+            break
+            
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset={last_update_id + 1}&timeout=30"
             with urllib.request.urlopen(url, timeout=40) as resp:
                 if resp.status != 200:
                     log.warning(f"  📱 Telegram getUpdates failed with status: {resp.status}")
+                    consecutive_failures += 1
                     time.sleep(10) # Wait before retrying on server errors
                     continue
 
                 data = json.load(resp)
 
             if data.get("ok"):
+                consecutive_failures = 0
                 for update in data.get("result", []):
                     last_update_id = update["update_id"]
                     if "message" in update and "text" in update["message"]:
@@ -145,13 +154,29 @@ def _poll_updates():
                         if command in COMMANDS:
                             log.info(f"  📱 Received command: {command}")
                             COMMANDS[command](update)
+            else:
+                consecutive_failures += 1
+                log.warning(f"  📱 Telegram API returned ok: False. Failures: {consecutive_failures}")
+                time.sleep(10)
             
+        except urllib.error.HTTPError as e:
+            consecutive_failures += 1
+            log.warning(f"  📱 Telegram HTTP error {e.code} (failure {consecutive_failures}/{max_failures})")
+            if e.code in [401, 404]:
+                log.error("  📱 Critical Telegram token error. Shutting down polling.")
+                break
+            time.sleep(15)
         except urllib.error.URLError as e:
-            log.warning(f"  📱 Telegram polling network error (will retry): {e}")
-            time.sleep(15) # Wait longer on network errors
+            consecutive_failures += 1
+            log.warning(f"  📱 Telegram polling network error (failure {consecutive_failures}/{max_failures}): {e}")
+            time.sleep(15)
         except Exception as e:
-            log.error(f"  📱 Unhandled error in Telegram polling loop: {e}", exc_info=True)
-            time.sleep(5) # Brief pause before retrying
+            consecutive_failures += 1
+            log.error(f"  📱 Unhandled error in Telegram polling (failure {consecutive_failures}/{max_failures}): {e}", exc_info=True)
+            time.sleep(5)
+
+    if consecutive_failures >= max_failures:
+        log.error("  📱 Too many consecutive Telegram polling failures. Command listener stopped.")
 
 def start_telegram_bot_polling():
     """Starts the Telegram bot command listener in a separate thread."""
