@@ -65,7 +65,8 @@ class DuplicateChecker:
                     new_cache[issue.number] = self._open_issues_cache[issue.number]
                     continue
                 
-                content = f"{issue.title}\n{issue.body or ''}"
+                # Truncate content to avoid exceeding max tokens (8000 chars is safe for ~2000 tokens)
+                content = f"{issue.title}\n{issue.body or ''}"[:8000]
                 embedding = self._get_embedding(content)
                 
                 if embedding:
@@ -90,7 +91,7 @@ class DuplicateChecker:
         Returns the similar issue info if a duplicate is found, else None.
         """
         try:
-            proposed_content = f"{title}\n{body}"
+            proposed_content = f"{title}\n{body}"[:8000]
             proposed_embedding = self._get_embedding(proposed_content)
             
             if not proposed_embedding:
