@@ -262,6 +262,7 @@ class PRReviewer:
                         f"⚠️ Escalating to human review. {fix_cycles} fix cycles exhausted."
                         + BOT_SIGNATURE
                     )
+                    tg(f"🔍 PR #{pr.number} needs human review — {fix_cycles} fix cycles exhausted\n{pr.html_url}")
                 self.stats["skipped"] += 1
                 return True
             diff = self.get_pr_diff(pr)
@@ -301,12 +302,20 @@ class PRReviewer:
                     pr.create_review(body=review_body_2 + BOT_SIGNATURE, event="COMMENT")
                 self.stats["reviewed"] += 1
                 return True
-            if not self.dry_run:
-                pr.create_review(body=review_body_2 + BOT_SIGNATURE, event="APPROVE")
-                pr.add_to_labels(self.repo.get_label(LABEL_REVIEWED))
+            if self.dry_run:
+                log.info(f"  [DRY RUN] Would post APPROVE and auto-merge PR #{pr.number}")
+                self.stats["reviewed"] += 1
+                return True
+            pr.create_review(body=review_body_2 + BOT_SIGNATURE, event="APPROVE")
+            pr.add_to_labels(self.repo.get_label(LABEL_REVIEWED))
             self.stats["reviewed"] += 1
             if self._should_auto_merge(pr, review_data_2):
-                self._auto_merge(pr)
+                if self._auto_merge(pr):
+                    tg(f"✅ Auto-merged PR #{pr.number}: {pr.title}\n{pr.html_url}")
+                else:
+                    tg(f"✅ PR #{pr.number} approved but auto-merge failed — merge manually\n{pr.html_url}")
+            else:
+                tg(f"✅ PR #{pr.number} approved — ready to merge\n{pr.html_url}")
             return True
         except Exception as e:
             log.error(f"  ❌ Failed to review PR #{pr.number}: {e}", exc_info=True)
