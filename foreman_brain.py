@@ -191,7 +191,13 @@ def process_message(user_message: str, chat_data: dict) -> str:
                 if block.name == "create_issue":
                     title = block.input.get("title", "")
                     body = block.input.get("body", "")
-                    duplicate, similar_id = is_duplicate_issue(repo, title, body, SIMILARITY_THRESHOLD)
+                    # Fix: pass text1, text2, model, threshold to is_duplicate_issue
+                    duplicate, similar_id = is_duplicate_issue(
+                        f"{title}\n\n{body}",
+                        repo_name,
+                        BRAIN_MODEL,
+                        SIMILARITY_THRESHOLD
+                    )
                     if duplicate:
                         log.info(f"Aborting creation of duplicate issue: '{title}' (Similar to {similar_id})")
                         result = f"Aborted: This issue appears too similar to existing {similar_id}."
