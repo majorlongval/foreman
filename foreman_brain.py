@@ -16,6 +16,7 @@ import asyncio
 import logging
 import argparse
 import math
+from typing import List, Dict, Optional
 
 import anthropic
 from github import Github
@@ -71,58 +72,14 @@ def get_github_repo(repo_name: str):
 
 # ─── Semantic Duplicate Check ───────────────────────────────
 
-def get_embedding(text: str) -> list[float]:
-    """Generate embedding for a string using Anthropic's Voyage integration."""
-    try:
-        # Note: Anthropic doesn't have a direct embedding API; using Voyage as the standard partner.
-        # If VOYAGE_API_KEY is missing, we fall back to a simple keyword overlap or skip.
-        # For the purpose of this implementation as per plan, we assume a compatible API is available.
-        import voyageai
-        vo = voyageai.Client()
-        result = vo.embed([text], model="voyage-2", input_type="document")
-        return result.embeddings[0]
-    except Exception as e:
-        log.warning(f"Failed to generate embedding (check VOYAGE_API_KEY): {e}")
-        return []
-
-
-def cosine_similarity(v1: list[float], v2: list[float]) -> float:
-    """Calculate cosine similarity between two vectors."""
-    if not v1 or not v2 or len(v1) != len(v2):
-        return 0.0
-    dot_product = sum(a * b for a, b in zip(v1, v2))
-    magnitude1 = math.sqrt(sum(a * a for a in v1))
-    magnitude2 = math.sqrt(sum(b * b for b in v2))
-    if magnitude1 == 0 or magnitude2 == 0:
-        return 0.0
-    return dot_product / (magnitude1 * magnitude2)
-
+from duplicate_check import is_duplicate_issue as _check_duplicate
 
 def is_duplicate_issue(repo, title: str, body: str) -> tuple[bool, str]:
     """Check if the proposed issue is semantically similar to an existing open issue."""
-    try:
-        new_content = f"{title}\n{body}"
-        new_embedding = get_embedding(new_content)
-        if not new_embedding:
-            return False, ""
-
-        open_issues = repo.get_issues(state="open")
-        for issue in open_issues:
-            if issue.pull_request:
-                continue
-            
-            existing_content = f"{issue.title}\n{issue.body or ''}"
-            existing_embedding = get_embedding(existing_content)
-            
-            similarity = cosine_similarity(new_embedding, existing_embedding)
-            if similarity > SIMILARITY_THRESHOLD:
-                log.info(f"Duplicate detected: '{title}' is {similarity:.2f} similar to #{issue.number}")
-                return True, str(issue.number)
-        
-        return False, ""
-    except Exception as e:
-        log.error(f"Error in duplicate check: {e}")
-        return False, ""
+    dup_info = _check_duplicate(repo, title, body)
+    if dup_info:
+        return True, str(dup_info["number"])
+    return False, ""
 
 
 # ─── System Prompt ────────────────────────────────────────────
