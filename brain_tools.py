@@ -8,7 +8,7 @@ via run_in_executor.
 
 import logging
 import os
-from llm_client import LLMClient, is_duplicate_issue
+from llm_client import LLMClient
 
 log = logging.getLogger("foreman.brain.tools")
 
@@ -18,7 +18,7 @@ SIMILARITY_THRESHOLD = float(os.environ.get("SIMILARITY_THRESHOLD", "0.9"))
 
 # ─── Tool Schemas (Claude API format) ────────────────────────
 
-TOOL_SCHEMAS = [
+TOOL_SCHEMES = [
     {
         "name": "get_project_status",
         "description": (
@@ -352,7 +352,8 @@ def _merge_pr(repo, number):
 def _create_issue(repo, title, body, labels=None):
     """Create a new issue with optional labels, checking for duplicates first."""
     try:
-        is_dup, dup_id = is_duplicate_issue(repo, title, body)
+        llm = LLMClient()
+        is_dup, dup_id = llm.is_duplicate_issue(repo, title, body)
         if is_dup:
             msg = f"Aborted: Issue '{title}' is a semantic duplicate of #{dup_id}."
             log.warning(msg)
