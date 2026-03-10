@@ -91,16 +91,13 @@ class FixAgent:
                 if not self.dry_run:
                     self.repo.create_label(name=name, color=color)
 
-    def _get_latest_foreman_review(self, pr) -> str | None:
-        """Get the body of the most recent FOREMAN review with issues."""
-        reviews = list(pr.get_reviews())
-        for review in reversed(reviews):
-            if review.body and BOT_SIGNATURE.strip() in review.body:
-                # Check if it has CRITICAL or IMPORTANT issues
-                body_upper = review.body.upper()
-                if "[CRITICAL]" in body_upper or "[IMPORTANT]" in body_upper:
-                    return review.body
-        return None
+    def _get_all_foreman_reviews(self, pr) -> list[str]:
+        """Get all FOREMAN review bodies with issues, oldest first."""
+        return [
+            r.body for r in pr.get_reviews()
+            if r.body and BOT_SIGNATURE.strip() in r.body
+            and ("[CRITICAL]" in r.body.upper() or "[IMPORTANT]" in r.body.upper())
+        ]
 
     def _count_fix_cycles(self, pr) -> int:
         """Count FOREMAN review cycles on this PR."""
@@ -147,14 +144,15 @@ class FixAgent:
             self.stats["skipped"] += 1
             return True
 
-        # Get the latest review with issues
-        review_body = self._get_latest_foreman_review(pr)
-        if not review_body:
+        # Get all reviews with issues
+        all_reviews = self._get_all_foreman_reviews(pr)
+        if not all_reviews:
             log.info(f"  No actionable FOREMAN review found — skipping")
             self.stats["skipped"] += 1
             return True
 
-        # Parse affected files
+        # Parse affected files from the latest review
+        review_body = all_reviews[-1]
         affected_files = self._parse_affected_files(review_body)
         if not affected_files:
             log.warning(f"  Could not parse affected files from review — skipping")
@@ -187,17 +185,21 @@ class FixAgent:
                     log.warning(f"  Could not read {filepath} from branch {branch}: {e}")
                     continue
 
-                # Extract issues for this file
-                file_issues = self._extract_issues_for_file(review_body, filepath)
+                # Build full review history for this file
+                history_parts = []
+                for i, rev in enumerate(all_reviews):
+                    issues = self._extract_issues_for_file(rev, filepath)
+                    history_parts.append(f"**Round {i+1}:**\n{issues}")
+                review_history = "\n\n---\n".join(history_parts)
 
                 # Generate fix
-                log.info(f"  Generating fix for {filepath}")
+                log.info(f"  Generating fix for {filepath} ({len(all_reviews)} review round(s) of context)")
                 model = self.router.get("implement")
                 response = self.llm.complete(
                     model=model,
                     system=FIX_SYSTEM,
                     message=(
-                        f"## Review Comments\n\n{file_issues}\n\n"
+                        f"## Review History\n\n{review_history}\n\n"
                         f"## Current File: {filepath}\n\n{current_content}"
                     ),
                     max_tokens=None,

@@ -286,13 +286,27 @@ class PRReviewer:
             log.error(f"  ❌ Auto-merge failed for PR #{pr.number}: {e}")
             return False
 
-    def _build_review_message(self, pr, diff: str, files: list[str]) -> str:
+    def _get_prior_reviews(self, pr) -> list[str]:
+        """Return all prior FOREMAN review bodies, oldest first."""
+        return [
+            r.body for r in pr.get_reviews()
+            if r.body and BOT_SIGNATURE.strip() in r.body
+        ]
+
+    def _build_review_message(self, pr, diff: str, files: list[str], prior_reviews: list[str] = None) -> str:
         """Build the user message for the LLM review call."""
+        history = ""
+        if prior_reviews:
+            formatted = "\n\n---\n".join(
+                f"**Round {i+1}:**\n{r}" for i, r in enumerate(prior_reviews)
+            )
+            history = f"\n\n## Prior Review History\n{formatted}"
         return (
             f"## PR #{pr.number}: {pr.title}\n\n"
             f"**Description:**\n{pr.body or '(no description)'}\n\n"
             f"**Changed files:** {', '.join(files)}\n\n"
             f"**Diff:**\n```\n{diff}\n```"
+            + history
         )
 
     def review_pr(self, pr) -> bool:
@@ -318,6 +332,9 @@ class PRReviewer:
             # ── Build review context ──
             diff = self.get_pr_diff(pr)
             files = self.get_changed_files(pr)
+            prior_reviews = self._get_prior_reviews(pr)
+            if prior_reviews:
+                log.info(f"  Including {len(prior_reviews)} prior review(s) in context")
 
             # Truncate massive diffs to avoid blowing context
             MAX_DIFF_CHARS = 100000
@@ -326,7 +343,7 @@ class PRReviewer:
                 diff = diff[:MAX_DIFF_CHARS] + f"\n\n... [TRUNCATED — {original_len} chars total, showing first {MAX_DIFF_CHARS}]"
                 log.warning(f"  ⚠️ Diff truncated from {original_len} chars")
 
-            review_message = self._build_review_message(pr, diff, files)
+            review_message = self._build_review_message(pr, diff, files, prior_reviews=prior_reviews)
 
             # ── Pass 1: cheap/standard review ──
             model_pass1 = self.router.get("review")
