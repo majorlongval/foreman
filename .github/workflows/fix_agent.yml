@@ -45,6 +45,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ROUTING_PROFILE: cheap
           FIX_COST_CEILING_USD: "1.0"
+          MAX_FIX_CYCLES: "5"
 
       - name: Run Fix Agent (manual trigger)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number != ''
@@ -57,6 +58,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ROUTING_PROFILE: cheap
           FIX_COST_CEILING_USD: "1.0"
+          MAX_FIX_CYCLES: "5"
 
       - name: Run Fix Agent (manual - all PRs)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number == ''
@@ -69,3 +71,4 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ROUTING_PROFILE: cheap
           FIX_COST_CEILING_USD: "1.0"
+          MAX_FIX_CYCLES: "5"
