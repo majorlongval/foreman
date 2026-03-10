@@ -154,6 +154,8 @@ def _poll_updates():
                         if command in COMMANDS:
                             log.info(f"  📱 Received command: {command}")
                             COMMANDS[command](update)
+                # Global rate limit to prevent spamming in case of instant responses
+                time.sleep(1)
             else:
                 consecutive_failures += 1
                 log.warning(f"  📱 Telegram API returned ok: False. Failures: {consecutive_failures}")
@@ -173,7 +175,7 @@ def _poll_updates():
         except Exception as e:
             consecutive_failures += 1
             log.error(f"  📱 Unhandled error in Telegram polling (failure {consecutive_failures}/{max_failures}): {e}", exc_info=True)
-            time.sleep(5)
+            time.sleep(15)
 
     if consecutive_failures >= max_failures:
         log.error("  📱 Too many consecutive Telegram polling failures. Command listener stopped.")
