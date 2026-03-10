@@ -182,9 +182,9 @@ class GeminiBackend:
     def embed(self, model: str, text: str) -> List[float]:
         response = self.client.models.embed_content(
             model=model,
-            contents=text
+            content=text
         )
-        return response.embeddings[0].values
+        return response.embedding.values
 
 
 class OpenAICompatBackend:
@@ -359,13 +359,15 @@ class LLMClient:
             return 0.0
         return dot_product / (magnitude1 * magnitude2)
 
-    def is_duplicate_issue(self, text1: str, text2: str, model: str, threshold: float = 0.85) -> bool:
-        """Check if two strings are likely duplicates using embeddings."""
-        v1 = self.embed(model, text1)
-        v2 = self.embed(model, text2)
-        similarity = self.cosine_similarity(v1, v2)
-        log.info(f"  Similarity: {similarity:.4f} (threshold: {threshold})")
-        return similarity >= threshold
+    def is_duplicate_issue(self, text: str, existing_embeddings: List[List[float]], model: str, threshold: float = 0.85) -> bool:
+        """Check if a string is a duplicate of any existing embeddings."""
+        new_v = self.embed(model, text)
+        for old_v in existing_embeddings:
+            similarity = self.cosine_similarity(new_v, old_v)
+            if similarity >= threshold:
+                log.info(f"  Duplicate found. Similarity: {similarity:.4f} (threshold: {threshold})")
+                return True
+        return False
 
 
 # ─── Model Router ─────────────────────────────────────────────
