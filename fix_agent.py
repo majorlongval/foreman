@@ -310,7 +310,7 @@ class FixAgent:
             if LABEL_NEEDS_HUMAN in pr_labels:
                 continue  # Escalated
             # Check for a FOREMAN review with issues
-            reviews = self._get_all_foreman_reviews(pr)
+            reviews = [r for r in pr.get_reviews() if r.body and "Review by FOREMAN" in r.body]
             review = reviews[-1] if reviews else None
             if review:
                 fixable.append(pr)
