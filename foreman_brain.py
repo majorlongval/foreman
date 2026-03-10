@@ -28,7 +28,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 DEFAULT_REPO = os.environ.get("FOREMAN_REPO", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-BRAIN_MODEL = os.environ.get("BRAIN_MODEL", "claude-sonnet-4-20250514")
+BRAIN_MODEL = os.environ.get("BRAIN_MODEL", "claude-sonnet-4-6")
 BRAIN_MAX_TOKENS = int(os.environ.get("BRAIN_MAX_TOKENS", "4096"))
 BRAIN_COST_CEILING = float(os.environ.get("BRAIN_COST_CEILING", "1.0"))
 ALLOWED_CHAT_IDS = os.environ.get("ALLOWED_CHAT_IDS", "")  # comma-separated, empty = allow all

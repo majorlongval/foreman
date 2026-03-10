@@ -200,7 +200,7 @@ class FixAgent:
                         f"## Review Comments\n\n{file_issues}\n\n"
                         f"## Current File: {filepath}\n\n{current_content}"
                     ),
-                    max_tokens=65536,
+                    max_tokens=None,
                 )
                 self.cost.record(model, response, agent="fixer", action="fix")
 

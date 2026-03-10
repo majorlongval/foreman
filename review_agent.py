@@ -335,7 +335,6 @@ class PRReviewer:
                 model=model_pass1,
                 system=REVIEW_SYSTEM,
                 message=review_message,
-                max_tokens=8000,
             )
             self.cost.record(model_pass1, response1, agent="review", action="review_pass1")
 
@@ -375,7 +374,6 @@ class PRReviewer:
                 model=model_pass2,
                 system=REVIEW_SYSTEM,
                 message=review_message,
-                max_tokens=8000,
             )
             self.cost.record(model_pass2, response2, agent="review", action="review_pass2")
 
