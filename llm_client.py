@@ -317,7 +317,7 @@ ROUTING_PROFILES = {
         "title_gen": "gemini/gemini-3.1-flash-lite-preview",
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "gemini/gemini-3-flash-preview",
-        "plan": "gemini/gemini-3-flash-preview",
+        "plan": "gemini/gemini-3.1-pro-preview",
     },
     "balanced": {
         # Balance cost and quality
