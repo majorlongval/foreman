@@ -180,8 +180,11 @@ def _poll_updates():
     if consecutive_failures >= max_failures:
         log.error("  📱 Too many consecutive Telegram polling failures. Command listener stopped.")
 
+_polling_thread = None
+
 def start_telegram_bot_polling():
     """Starts the Telegram bot command listener in a separate thread."""
+    global _polling_thread
     if not TELEGRAM_BOT_TOKEN:
         log.info("  📱 Telegram bot token not configured, command polling disabled.")
         return
@@ -190,6 +193,10 @@ def start_telegram_bot_polling():
         return
 
     log.info("  📱 Starting Telegram bot command listener...")
-    thread = threading.Thread(target=_poll_updates, daemon=True)
-    thread.start()
+    _polling_thread = threading.Thread(target=_poll_updates, daemon=True)
+    _polling_thread.start()
     log.info("  📱 Telegram bot command listener started.")
+
+def is_polling_alive() -> bool:
+    """Check if the Telegram polling thread is still running."""
+    return _polling_thread is not None and _polling_thread.is_alive()
