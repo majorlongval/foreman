@@ -31,6 +31,7 @@ Usage:
 
 import os
 import logging
+import math
 from dataclasses import dataclass
 from typing import List
 
@@ -348,6 +349,23 @@ class LLMClient:
         except Exception as e:
             log.error(f"  Failed LLM embedding call: {e}")
             raise
+
+    def cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        magnitude1 = math.sqrt(sum(a * a for a in vec1))
+        magnitude2 = math.sqrt(sum(b * b for b in vec2))
+        if not magnitude1 or not magnitude2:
+            return 0.0
+        return dot_product / (magnitude1 * magnitude2)
+
+    def is_duplicate_issue(self, text1: str, text2: str, model: str, threshold: float = 0.85) -> bool:
+        """Check if two strings are likely duplicates using embeddings."""
+        v1 = self.embed(model, text1)
+        v2 = self.embed(model, text2)
+        similarity = self.cosine_similarity(v1, v2)
+        log.info(f"  Similarity: {similarity:.4f} (threshold: {threshold})")
+        return similarity >= threshold
 
 
 # ─── Model Router ─────────────────────────────────────────────
