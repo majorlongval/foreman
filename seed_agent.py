@@ -64,7 +64,7 @@ log = logging.getLogger("foreman")
 from cost_monitor import CostTracker, CloudCostMonitor, create_cost_system
 from llm_client import LLMClient, ModelRouter
 from telegram_notifier import notify as tg
-from agent_state import state, AgentState
+from agent_state import agent_state_manager as state, AgentState
 
 
 # ─── Vision Loader ───────────────────────────────────────────
@@ -424,7 +424,7 @@ def main(
     try:
         while True:
             # Check for paused state
-            while state.is_paused():
+            while state.get_state() == AgentState.PAUSED:
                 log.info("Agent is PAUSED. Waiting for resume command...")
                 time.sleep(15) # Check every 15 seconds
 
