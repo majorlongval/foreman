@@ -75,8 +75,3 @@ jobs:
           FIX_COST_CEILING_USD: "1.0"
           MAX_FIX_CYCLES: "5"
 
-      - name: Trigger review after fix
-        if: success()
-        run: gh workflow run review_agent.yml
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}

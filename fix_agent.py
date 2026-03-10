@@ -153,8 +153,12 @@ class FixAgent:
             self.stats["skipped"] += 1
             return True
 
-        # Parse affected files from the latest review
+        # Skip if the latest verdict is APPROVE — nothing to fix
         review_body = all_reviews[-1]
+        if '"verdict": "APPROVE"' in review_body:
+            log.info(f"  Latest review is APPROVE — skipping fix")
+            self.stats["skipped"] += 1
+            return True
         affected_files = self._parse_affected_files(review_body)
         if not affected_files:
             log.warning(f"  Could not parse affected files from review — skipping")

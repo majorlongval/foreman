@@ -298,6 +298,14 @@ class PRReviewer:
             if r.body and BOT_SIGNATURE.strip() in r.body
         ]
 
+    def _already_reviewed_head(self, pr) -> bool:
+        """Return True if FOREMAN already posted a review on the current HEAD commit."""
+        head_sha = pr.head.sha
+        for r in pr.get_reviews():
+            if r.body and BOT_SIGNATURE.strip() in r.body and r.commit_id == head_sha:
+                return True
+        return False
+
     def _build_review_message(self, pr, diff: str, files: list[str], prior_reviews: list[str] = None) -> str:
         """Build the user message for the LLM review call."""
         history = ""
@@ -319,6 +327,12 @@ class PRReviewer:
         log.info(f"🔍 Reviewing PR #{pr.number}: {pr.title}")
 
         try:
+            # ── Skip if already reviewed this commit ──
+            if self._already_reviewed_head(pr):
+                log.info(f"  Already reviewed HEAD {pr.head.sha[:8]} — skipping")
+                self.stats["skipped"] += 1
+                return True
+
             # ── Check fix cycle count ──
             fix_cycles = self._count_fix_cycles(pr)
             if fix_cycles >= MAX_FIX_CYCLES:
