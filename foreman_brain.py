@@ -15,6 +15,8 @@ import sys
 import asyncio
 import logging
 import argparse
+import math
+from typing import List, Dict, Optional
 
 import anthropic
 from github import Github
@@ -32,6 +34,7 @@ BRAIN_MODEL = os.environ.get("BRAIN_MODEL", "claude-sonnet-4-6")
 BRAIN_MAX_TOKENS = int(os.environ.get("BRAIN_MAX_TOKENS", "4096"))
 BRAIN_COST_CEILING = float(os.environ.get("BRAIN_COST_CEILING", "1.0"))
 ALLOWED_CHAT_IDS = os.environ.get("ALLOWED_CHAT_IDS", "")  # comma-separated, empty = allow all
+SIMILARITY_THRESHOLD = float(os.environ.get("SIMILARITY_THRESHOLD", "0.9"))
 
 # ─── Logging ──────────────────────────────────────────────────
 
@@ -64,6 +67,18 @@ def get_github_repo(repo_name: str):
     if repo_name not in _repo_cache:
         _repo_cache[repo_name] = _get_github().get_repo(repo_name)
     return _repo_cache[repo_name]
+
+
+# ─── Semantic Duplicate Check ───────────────────────────────
+
+from duplicate_check import is_duplicate_issue as _check_duplicate
+
+def is_duplicate_issue(repo, title: str, body: str) -> tuple[bool, str]:
+    """Check if the proposed issue is semantically similar to an existing open issue."""
+    dup_info = _check_duplicate(repo, title, body)
+    if dup_info:
+        return True, str(dup_info["number"])
+    return False, ""
 
 
 # ─── System Prompt ────────────────────────────────────────────
@@ -183,7 +198,20 @@ def process_message(user_message: str, chat_data: dict) -> str:
         for block in response.content:
             if block.type == "tool_use":
                 log.info(f"Tool call: {block.name}")
-                result = execute_tool(block.name, block.input, repo)
+                
+                # Intercept create_issue for duplicate check
+                if block.name == "create_issue":
+                    title = block.input.get("title", "")
+                    body = block.input.get("body", "")
+                    is_dup, dup_id = is_duplicate_issue(repo, title, body)
+                    if is_dup:
+                        log.info(f"Aborting creation of duplicate issue: '{title}' (similar to #{dup_id})")
+                        result = f"Aborted: This issue appears semantically similar to existing issue #{dup_id}. Please check that issue before creating a new one."
+                    else:
+                        result = execute_tool(block.name, block.input, repo)
+                else:
+                    result = execute_tool(block.name, block.input, repo)
+                    
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -205,7 +233,7 @@ def process_message(user_message: str, chat_data: dict) -> str:
             response = client.messages.create(
                 model=BRAIN_MODEL,
                 max_tokens=BRAIN_MAX_TOKENS,
-                system=system,
+            system=system,
                 tools=TOOL_SCHEMAS,
                 messages=history,
             )
@@ -419,6 +447,7 @@ def main():
     log.info(f"  Max tokens: {BRAIN_MAX_TOKENS}")
     log.info(f"  Cost ceiling: ${BRAIN_COST_CEILING:.2f}")
     log.info(f"  Allowed chats: {ALLOWED_CHAT_IDS or '(all)'}")
+    log.info(f"  Similarity threshold: {SIMILARITY_THRESHOLD}")
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
