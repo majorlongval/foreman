@@ -46,28 +46,43 @@ logging.basicConfig(
 )
 log = logging.getLogger("foreman.implement")
 
+# ─── Standards Utility ────────────────────────────────────────
+
+def get_coding_standards() -> str:
+    """Reads STANDARDS.md from the repository root."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "STANDARDS.md")
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+        log.warning("STANDARDS.md not found in root")
+        return "No specific coding standards provided."
+    except Exception as e:
+        log.error(f"Error reading STANDARDS.md: {e}")
+        return "Error loading coding standards."
+
 # ─── Prompts ─────────────────────────────────────────────────
 
-PLAN_SYSTEM = """You are FOREMAN, an autonomous implementation agent.
+PLAN_SYSTEM = f"""You are FOREMAN, an autonomous implementation agent.
 
 You will receive a GitHub issue (title + structured body) and the current repository file tree.
 
 Your job: produce a JSON implementation plan.
 
 Output ONLY valid JSON with this exact schema:
-{
-  "branch": "foreman/issue-{number}-{slug}",
+{{
+  "branch": "foreman/issue-{{number}}-{{slug}}",
   "files": [
-    {
+    {{
       "path": "relative/path/to/file.py",
       "action": "create" or "modify",
       "description": "What this file does / what change is needed",
       "relevant_context_paths": ["path/to/existing/file/for/context"]
-    }
+    }}
   ],
   "pr_title": "Short imperative title (max 72 chars)",
   "pr_summary": "2-3 sentence description of the implementation approach"
-}
+}}
 
 Rules:
 - Branch name: prefix "foreman/", lowercase, hyphens only, max 60 chars total
@@ -77,9 +92,12 @@ Rules:
 - NEVER rewrite an existing file entirely if you only need to add a few lines — use "modify" and describe the minimal change needed
 - NEVER touch files unrelated to the acceptance criteria
 - Prefer creating new files over modifying large existing ones
-- No markdown fences. Pure JSON only."""
+- No markdown fences. Pure JSON only.
 
-IMPLEMENT_SYSTEM = """You are FOREMAN, an autonomous code implementation agent.
+Coding Standards to follow:
+{get_coding_standards()}"""
+
+IMPLEMENT_SYSTEM = f"""You are FOREMAN, an autonomous code implementation agent.
 
 You will receive a GitHub issue, an implementation plan, the specific file to write,
 and contents of relevant existing files for context.
@@ -92,7 +110,10 @@ Rules:
 - Include logging statements — this runs unattended, logs are the only visibility
 - Wrap everything in try/except — never let an unhandled exception crash a loop
 - Keep it simple and focused. No over-engineering.
-- If modifying an existing file, preserve all existing code and only add/change what's needed"""
+- If modifying an existing file, preserve all existing code and only add/change what's needed
+
+Coding Standards:
+{get_coding_standards()}"""
 
 
 # ─── GitHub Client ────────────────────────────────────────────
