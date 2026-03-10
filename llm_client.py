@@ -32,6 +32,7 @@ Usage:
 import os
 import logging
 from dataclasses import dataclass
+from typing import List
 
 log = logging.getLogger("foreman.llm")
 
@@ -64,6 +65,7 @@ PRICING = {
     "gemini/gemini-2.5-pro":               (1.25, 10.0),
     "gemini/gemini-2.5-flash":             (0.15, 0.60),
     "gemini/gemini-2.5-flash-lite":        (0.075, 0.30),
+    "gemini/text-embedding-004":           (0.0, 0.0), # Free or negligible
     # Google Gemini — 3.x series (preview, pricing TBD — estimated)
     "gemini/gemini-3.1-pro-preview":       (1.25, 10.0),
     "gemini/gemini-3-flash-preview":       (0.15, 0.60),
@@ -73,6 +75,7 @@ PRICING = {
     "openai/gpt-4o":                       (2.50, 10.0),
     "openai/gpt-4o-mini":                  (0.15, 0.60),
     "openai/o3-mini":                      (1.10, 4.40),
+    "openai/text-embedding-3-small":       (0.02, 0.0),
 
     # Groq (fast inference)
     "groq/llama-3.3-70b-versatile":        (0.59, 0.79),
@@ -123,6 +126,9 @@ class AnthropicBackend:
             raw=response,
         )
 
+    def embed(self, model: str, text: str) -> List[float]:
+        raise NotImplementedError("Anthropic does not provide an embeddings API yet.")
+
 
 class GeminiBackend:
     def __init__(self):
@@ -171,6 +177,13 @@ class GeminiBackend:
             cost_usd=estimate_cost(model_key, input_tokens, output_tokens),
             raw=response,
         )
+
+    def embed(self, model: str, text: str) -> List[float]:
+        response = self.client.models.embed_content(
+            model=model,
+            contents=text
+        )
+        return response.embeddings[0].values
 
 
 class OpenAICompatBackend:
@@ -235,6 +248,13 @@ class OpenAICompatBackend:
             raw=response,
         )
 
+    def embed(self, model: str, text: str) -> List[float]:
+        response = self.client.embeddings.create(
+            input=text,
+            model=model
+        )
+        return response.data[0].embedding
+
 
 # ─── Unified Client ──────────────────────────────────────────
 
@@ -284,23 +304,50 @@ class LLMClient:
         Returns:
             LLMResponse with text, token counts, and cost estimate
         """
-        if "/" not in model:
-            raise ValueError(
-                f"Model must be in 'provider/model' format, got: '{model}'. "
-                f"Example: 'anthropic/claude-sonnet-4-6'"
+        try:
+            if "/" not in model:
+                raise ValueError(
+                    f"Model must be in 'provider/model' format, got: '{model}'. "
+                    f"Example: 'anthropic/claude-sonnet-4-6'"
+                )
+
+            provider, model_name = model.split("/", 1)
+            backend = self._get_backend(provider)
+
+            log.info(f"  🤖 {provider}/{model_name}" + (f" (max {max_tokens} tokens)" if max_tokens else ""))
+            response = backend.complete(model_name, system, message, max_tokens)
+
+            log.info(
+                f"  ✓ {response.input_tokens} in / {response.output_tokens} out "
+                f"= ${response.cost_usd:.4f}"
             )
+            return response
+        except Exception as e:
+            log.error(f"  Failed LLM completion call: {e}")
+            raise
 
-        provider, model_name = model.split("/", 1)
-        backend = self._get_backend(provider)
+    def embed(self, model: str, text: str) -> List[float]:
+        """Generate an embedding vector for a piece of text.
 
-        log.info(f"  🤖 {provider}/{model_name}" + (f" (max {max_tokens} tokens)" if max_tokens else ""))
-        response = backend.complete(model_name, system, message, max_tokens)
+        Args:
+            model: "provider/model-name" format (e.g. "openai/text-embedding-3-small")
+            text: Text to embed
 
-        log.info(
-            f"  ✓ {response.input_tokens} in / {response.output_tokens} out "
-            f"= ${response.cost_usd:.4f}"
-        )
-        return response
+        Returns:
+            List of floats representing the embedding vector
+        """
+        try:
+            if "/" not in model:
+                raise ValueError(f"Model must be in 'provider/model' format, got: '{model}'")
+
+            provider, model_name = model.split("/", 1)
+            backend = self._get_backend(provider)
+
+            log.info(f"  🧬 Embedding via {provider}/{model_name} (length: {len(text)})")
+            return backend.embed(model_name, text)
+        except Exception as e:
+            log.error(f"  Failed LLM embedding call: {e}")
+            raise
 
 
 # ─── Model Router ─────────────────────────────────────────────
@@ -317,6 +364,7 @@ ROUTING_PROFILES = {
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "gemini/gemini-3-flash-preview",
         "plan": "gemini/gemini-3-flash-preview",
+        "embed": "gemini/text-embedding-004",
     },
     "balanced": {
         # Balance cost and quality
@@ -328,6 +376,7 @@ ROUTING_PROFILES = {
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "anthropic/claude-sonnet-4-6",
         "plan": "anthropic/claude-opus-4-6",
+        "embed": "openai/text-embedding-3-small",
     },
     "quality": {
         # Maximize quality — use best models everywhere
@@ -339,6 +388,7 @@ ROUTING_PROFILES = {
         "commit_msg": "anthropic/claude-sonnet-4-6",
         "implement": "anthropic/claude-opus-4-6",
         "plan": "anthropic/claude-opus-4-6",
+        "embed": "openai/text-embedding-3-small",
     },
 }
 
