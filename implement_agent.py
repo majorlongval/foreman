@@ -348,12 +348,13 @@ class ImplementAgent:
         except Exception as e:
             log.error(f"  ❌ Failed #{issue.number}: {e}", exc_info=True)
             self.stats["failed"] += 1
+            return False
+        finally:
             if not self.dry_run:
                 try:
                     issue.remove_from_labels(LABEL_IMPLEMENTING)
                 except Exception:
                     pass
-            return False
     def run_once(self, issue_number: int = None) -> dict:
         log.info("=" * 60)
         log.info(f"🔄 FOREMAN implement pass @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
