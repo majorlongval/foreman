@@ -163,6 +163,19 @@ class FixAgent:
 
         log.info(f"  Affected files: {affected_files}")
 
+        # Sync PR branch with main to resolve conflicts
+        if not self.dry_run:
+            branch = pr.head.ref
+            try:
+                self.repo.merge(
+                    base=branch,
+                    head="main",
+                    commit_message=f"Merge main into {branch}",
+                )
+                log.info(f"  Merged main into {branch}")
+            except Exception as e:
+                log.warning(f"  Could not merge main into branch: {e}")
+
         # Claim the PR
         if not self.dry_run:
             try:
@@ -170,7 +183,6 @@ class FixAgent:
             except Exception:
                 pass
 
-        branch = pr.head.ref
         fixes_applied = []
 
         try:
