@@ -249,7 +249,7 @@ class PRReviewer:
         """Count how many FOREMAN review cycles this PR has been through."""
         count = 0
         for review in pr.get_reviews():
-            if review.body and BOT_SIGNATURE in review.body:
+            if review.body and BOT_SIGNATURE.strip() in review.body:
                 count += 1
         return count
 
@@ -313,7 +313,7 @@ class PRReviewer:
                     )
                     tg(f"🔍 PR #{pr.number} needs human review — {fix_cycles} fix cycles exhausted\n{pr.html_url}")
                 self.stats["skipped"] += 1
-                return False
+                return True  # Escalation succeeded — PR was handled, not failed
 
             # ── Build review context ──
             diff = self.get_pr_diff(pr)
@@ -321,9 +321,10 @@ class PRReviewer:
 
             # Truncate massive diffs to avoid blowing context
             MAX_DIFF_CHARS = 50000
-            if len(diff) > MAX_DIFF_CHARS:
-                diff = diff[:MAX_DIFF_CHARS] + f"\n\n... [TRUNCATED — {len(diff)} chars total, showing first {MAX_DIFF_CHARS}]"
-                log.warning(f"  ⚠️ Diff truncated from {len(diff)} chars")
+            original_len = len(diff)
+            if original_len > MAX_DIFF_CHARS:
+                diff = diff[:MAX_DIFF_CHARS] + f"\n\n... [TRUNCATED — {original_len} chars total, showing first {MAX_DIFF_CHARS}]"
+                log.warning(f"  ⚠️ Diff truncated from {original_len} chars")
 
             review_message = self._build_review_message(pr, diff, files)
 
@@ -439,7 +440,7 @@ class PRReviewer:
             return True
 
         except Exception as e:
-            log.error(f"  ❌ Failed to review PR #{pr.number}: {e}")
+            log.error(f"  ❌ Failed to review PR #{pr.number}: {e}", exc_info=True)
             self.stats["failed"] += 1
             return False
 
