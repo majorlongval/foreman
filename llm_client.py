@@ -308,15 +308,15 @@ class LLMClient:
 # Predefined routing profiles — maps task types to models
 ROUTING_PROFILES = {
     "cheap": {
-        # 3.1 Flash for decisions, Flash Lite for cheap mechanical tasks
+        # gemini-3-flash-preview for reasoning tasks, 3.1-pro for confirmation
         "refine": "gemini/gemini-3-flash-preview",
         "brainstorm": "gemini/gemini-3-flash-preview",
         "review": "gemini/gemini-3-flash-preview",
         "review_confirm": "gemini/gemini-3.1-pro-preview",
         "title_gen": "gemini/gemini-3.1-flash-lite-preview",
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
-        "implement": "gemini/gemini-3.1-flash-preview",
-        "plan": "gemini/gemini-3.1-flash-preview",
+        "implement": "gemini/gemini-3-flash-preview",
+        "plan": "gemini/gemini-3-flash-preview",
     },
     "balanced": {
         # Balance cost and quality
