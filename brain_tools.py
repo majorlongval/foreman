@@ -353,8 +353,14 @@ def _create_issue(repo, title, body, labels=None):
     """Create a new issue with optional labels, checking for duplicates first."""
     try:
         llm = LLMClient()
-        is_dup, dup_id = llm.is_duplicate_issue(repo, title, body)
+        issues = list(repo.get_issues(state="open"))
+        real_issues = [i for i in issues if i.pull_request is None]
+        texts = [f"{i.title}\n{i.body or ''}" for i in real_issues]
+        embeddings = llm.get_embeddings(texts)
+        
+        is_dup, dup_idx = llm.is_duplicate(f"{title}\n{body}", embeddings, threshold=SIMILARITY_THRESHOLD)
         if is_dup:
+            dup_id = real_issues[dup_idx].number
             msg = f"Aborted: Issue '{title}' is a semantic duplicate of #{dup_id}."
             log.warning(msg)
             return msg
