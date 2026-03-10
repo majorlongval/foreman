@@ -17,15 +17,17 @@ class DuplicateChecker:
     def __init__(self, repo):
         self.repo = repo
         self._open_issues_cache: Optional[Dict] = None
+        self._llm_client = None
 
     def _get_embedding(self, text: str) -> List[float]:
         """
         Generates an embedding for the given text using the unified LLM client.
         """
         try:
-            from llm_client import LLMClient
-            client = LLMClient()
-            return client.generate_embedding(text)
+            if self._llm_client is None:
+                from llm_client import LLMClient
+                self._llm_client = LLMClient()
+            return self._llm_client.generate_embedding(text)
         except Exception as e:
             log.error(f"Failed to generate embedding: {e}")
             return []
