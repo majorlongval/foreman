@@ -57,34 +57,35 @@ class LLMResponse:
 # Update these as pricing changes. Agent can update this file itself later.
 PRICING = {
     # Anthropic
-    "anthropic/claude-opus-4-6":    (15.0, 75.0),
-    "anthropic/claude-sonnet-4-6":  (3.0, 15.0),
-    "anthropic/claude-haiku-4-5-20251001": (0.80, 4.0),
+    "claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
+    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
+    "claude-opus-4-6":           {"input": 15.0, "output": 75.0},
+    "anthropic/claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
+    "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
+    "anthropic/claude-opus-4-6":           {"input": 15.0, "output": 75.0},
+    "gemini/gemini-2.5-pro":               {"input": 1.25, "output": 10.0},
+    "gemini/gemini-2.5-flash":             {"input": 0.15, "output": 0.60},
+    "gemini/gemini-2.5-flash-lite":        {"input": 0.075, "output": 0.30},
+    "gemini/gemini-3.1-pro-preview":       {"input": 1.25, "output": 10.0},
+    "gemini/gemini-3-flash-preview":       {"input": 0.15, "output": 0.60},
+    "gemini/gemini-3.1-flash-lite-preview":{"input": 0.075, "output": 0.30},
 
-    # Google Gemini — 2.5 series (stable)
-    "gemini/gemini-2.5-pro":               (1.25, 10.0),
-    "gemini/gemini-2.5-flash":             (0.15, 0.60),
-    "gemini/gemini-2.5-flash-lite":        (0.075, 0.30),
-    # Google Gemini — 3.x series (preview, pricing TBD — estimated)
-    "gemini/gemini-3.1-pro-preview":       (1.25, 10.0),
-    "gemini/gemini-3-flash-preview":       (0.15, 0.60),
-    "gemini/gemini-3.1-flash-lite-preview":(0.075, 0.30),
     # Embedding models
-    "gemini/text-embedding-004":           (0.0, 0.0), # Free within limits or very cheap
+    "gemini/text-embedding-004":           {"input": 0.0, "output": 0.0}, # Free within limits or very cheap
 
     # OpenAI
-    "openai/gpt-4o":                       (2.50, 10.0),
-    "openai/gpt-4o-mini":                  (0.15, 0.60),
-    "openai/o3-mini":                      (1.10, 4.40),
-    "openai/text-embedding-3-small":       (0.02, 0.0),
-    "openai/text-embedding-3-large":       (0.13, 0.0),
+    "openai/gpt-4o":                       {"input": 2.50, "output": 10.0},
+    "openai/gpt-4o-mini":                  {"input": 0.15, "output": 0.60},
+    "openai/o3-mini":                      {"input": 1.10, "output": 4.40},
+    "openai/text-embedding-3-small":       {"input": 0.02, "output": 0.0},
+    "openai/text-embedding-3-large":       {"input": 0.13, "output": 0.0},
 
     # Groq (fast inference)
-    "groq/llama-3.3-70b-versatile":        (0.59, 0.79),
-    "groq/gemma2-9b-it":                   (0.20, 0.20),
+    "groq/llama-3.3-70b-versatile":        {"input": 0.59, "output": 0.79},
+    "groq/gemma2-9b-it":                   {"input": 0.20, "output": 0.20},
 
     # Local models (free)
-    "ollama/any":                          (0.0, 0.0),
+    "ollama/any":                          {"input": 0.0, "output": 0.0},
 }
 
 def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> float:
@@ -97,8 +98,7 @@ def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> floa
             return 0.0
         log.warning(f"No pricing data for {model_key}, estimating $0")
         return 0.0
-    input_price, output_price = pricing
-    return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
+    return (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
 
 
 # ─── Provider Backends ───────────────────────────────────────
@@ -448,6 +448,6 @@ class ModelRouter:
     def summary(self) -> str:
         lines = [f"Router profile: {self.profile_name}"]
         for task, model in sorted(self.routes.items()):
-            pricing = PRICING.get(model, (0, 0))
-            lines.append(f"  {task:12s} → {model:45s} (${pricing[0]:.2f}/${pricing[1]:.2f} per 1M)")
+            pricing = PRICING.get(model, {"input": 0, "output": 0})
+            lines.append(f"  {task:12s} → {model:45s} (${pricing['input']:.2f}/${pricing['output']:.2f} per 1M)")
         return "\n".join(lines)

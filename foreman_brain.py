@@ -233,7 +233,7 @@ def process_message(user_message: str, chat_data: dict) -> str:
             response = client.messages.create(
                 model=BRAIN_MODEL,
                 max_tokens=BRAIN_MAX_TOKENS,
-            system=system,
+                system=system,
                 tools=TOOL_SCHEMAS,
                 messages=history,
             )
