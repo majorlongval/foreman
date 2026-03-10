@@ -106,8 +106,11 @@ One paragraph overall assessment. Is this PR safe to merge? What's the risk leve
 
 ## Issues
 For each issue found:
-- **[CRITICAL/IMPORTANT/SUGGESTION]** `filename:line_range` — Description of the issue
-  and what to do about it.
+- **[CRITICAL/IMPORTANT/SUGGESTION]** `filename:line_range` — Description of the issue.
+  **Suggested fix:**
+  ```python
+  # exact replacement code here
+  ```
 
 If no issues, write: No issues found.
 
@@ -131,6 +134,8 @@ Rules:
 - If the diff is clean and safe, say so briefly and approve.
 - Always flag anything that could cause runaway costs or infinite loops.
 - Remember: this code runs UNATTENDED. Failures must be graceful.
+- ALWAYS include a concrete "Suggested fix" code block for every CRITICAL and IMPORTANT issue.
+  The fixer is a dumb model that will apply your suggestions literally — be precise and complete.
 - The Review Data JSON block MUST be the last section and MUST be valid JSON.
 """
 

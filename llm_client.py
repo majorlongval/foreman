@@ -308,11 +308,12 @@ class LLMClient:
 # Predefined routing profiles — maps task types to models
 ROUTING_PROFILES = {
     "cheap": {
-        # gemini-3-flash-preview for reasoning tasks, 3.1-pro for confirmation
+        # Smart model for review (suggests fixes); dumb model to apply them
         "refine": "gemini/gemini-3-flash-preview",
         "brainstorm": "gemini/gemini-3-flash-preview",
-        "review": "gemini/gemini-3-flash-preview",
+        "review": "gemini/gemini-3.1-pro-preview",
         "review_confirm": "gemini/gemini-3.1-pro-preview",
+        "fix": "gemini/gemini-3.1-flash-lite-preview",
         "title_gen": "gemini/gemini-3.1-flash-lite-preview",
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "gemini/gemini-3-flash-preview",
@@ -322,8 +323,9 @@ ROUTING_PROFILES = {
         # Balance cost and quality
         "refine": "anthropic/claude-sonnet-4-6",
         "brainstorm": "anthropic/claude-sonnet-4-6",
-        "review": "anthropic/claude-sonnet-4-6",
+        "review": "anthropic/claude-opus-4-6",
         "review_confirm": "anthropic/claude-opus-4-6",
+        "fix": "anthropic/claude-sonnet-4-6",
         "title_gen": "gemini/gemini-3.1-flash-lite-preview",
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "anthropic/claude-sonnet-4-6",
@@ -335,6 +337,7 @@ ROUTING_PROFILES = {
         "brainstorm": "anthropic/claude-opus-4-6",
         "review": "anthropic/claude-opus-4-6",
         "review_confirm": "anthropic/claude-opus-4-6",
+        "fix": "anthropic/claude-sonnet-4-6",
         "title_gen": "anthropic/claude-sonnet-4-6",
         "commit_msg": "anthropic/claude-sonnet-4-6",
         "implement": "anthropic/claude-opus-4-6",

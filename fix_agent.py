@@ -52,16 +52,18 @@ log = logging.getLogger("foreman.fixer")
 
 # ─── Fix Prompt ──────────────────────────────────────────────
 
-FIX_SYSTEM = """You are FOREMAN's code fixer. You receive review comments and the current
-file content. Your job is to make MINIMAL changes to fix the issues identified.
+FIX_SYSTEM = """You are FOREMAN's code patcher. You receive a file and a review history
+containing issues with suggested fixes written by a senior reviewer.
+
+Your ONLY job is to apply the suggested fixes exactly as specified.
 
 Rules:
-- Fix ONLY the issues described in the review comments.
-- Do NOT refactor, reorganize, rename, or "improve" anything not mentioned.
+- Apply every "Suggested fix" from CRITICAL and IMPORTANT issues.
+- Do NOT change anything not covered by a suggested fix.
+- Do NOT refactor, rename, or "improve" anything not mentioned.
 - Do NOT add features, comments, or documentation not requested.
-- Preserve all existing functionality — your changes must be surgical.
-- Match the existing code style exactly.
-- Output ONLY the complete fixed file content. No markdown fences. No explanation.
+- If a suggested fix conflicts with the current code, apply the intent of the fix.
+- Output ONLY the complete patched file content. No markdown fences. No explanation.
   The raw file content starts at character 0.
 """
 
@@ -194,7 +196,7 @@ class FixAgent:
 
                 # Generate fix
                 log.info(f"  Generating fix for {filepath} ({len(all_reviews)} review round(s) of context)")
-                model = self.router.get("implement")
+                model = self.router.get("fix")
                 response = self.llm.complete(
                     model=model,
                     system=FIX_SYSTEM,
