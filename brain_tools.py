@@ -7,8 +7,15 @@ via run_in_executor.
 """
 
 import logging
+import os
+import math
+import openai
 
 log = logging.getLogger("foreman.brain.tools")
+
+# ─── Configuration ───────────────────────────────────────────
+
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.9"))
 
 # ─── Tool Schemas (Claude API format) ────────────────────────
 
@@ -98,7 +105,7 @@ TOOL_SCHEMAS = [
         "name": "create_issue",
         "description": (
             "Create a new GitHub issue. Defaults to the 'needs-refinement' label "
-            "if no labels are specified."
+            "if no labels are specified. Checks for semantic duplicates before creation."
         ),
         "input_schema": {
             "type": "object",
@@ -147,6 +154,66 @@ TOOL_SCHEMAS = [
         },
     },
 ]
+
+
+# ─── Utility Functions ───────────────────────────────────────
+
+def _get_embedding(text):
+    """Generate text embedding using OpenAI API."""
+    try:
+        client = openai.OpenAI()
+        response = client.embeddings.create(
+            input=text,
+            model="text-embedding-3-small"
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        log.error(f"Error generating embedding: {e}")
+        return None
+
+
+def _cosine_similarity(v1, v2):
+    """Calculate cosine similarity between two vectors."""
+    try:
+        dot_product = sum(a * b for a, b in zip(v1, v2))
+        magnitude1 = math.sqrt(sum(a * a for a in v1))
+        magnitude2 = math.sqrt(sum(a * a for a in v2))
+        if magnitude1 == 0 or magnitude2 == 0:
+            return 0
+        return dot_product / (magnitude1 * magnitude2)
+    except Exception:
+        return 0
+
+
+def _is_duplicate_issue(repo, title, body):
+    """Check if a proposed issue is semantically similar to any open issue."""
+    try:
+        new_content = f"{title}\n{body}"
+        new_embedding = _get_embedding(new_content)
+        if not new_embedding:
+            return None
+
+        open_issues = list(repo.get_issues(state="open"))
+        real_issues = [i for i in open_issues if i.pull_request is None]
+
+        for existing_issue in real_issues:
+            existing_content = f"{existing_issue.title}\n{existing_issue.body}"
+            existing_embedding = _get_embedding(existing_content)
+            if not existing_embedding:
+                continue
+
+            similarity = _cosine_similarity(new_embedding, existing_embedding)
+            if similarity > SIMILARITY_THRESHOLD:
+                log.info(
+                    f"Duplicate issue detected: '{title}' is similar to #{existing_issue.number} "
+                    f"(score: {similarity:.4f})"
+                )
+                return existing_issue.number
+
+        return None
+    except Exception as e:
+        log.error(f"is_duplicate_issue check failed: {e}")
+        return None
 
 
 # ─── Tool Implementations ────────────────────────────────────
@@ -344,8 +411,14 @@ def _merge_pr(repo, number):
 
 
 def _create_issue(repo, title, body, labels=None):
-    """Create a new issue with optional labels."""
+    """Create a new issue with optional labels, after semantic duplicate check."""
     try:
+        duplicate_number = _is_duplicate_issue(repo, title, body)
+        if duplicate_number:
+            msg = f"Skipped creating issue '{title}' because it is too similar to existing issue #{duplicate_number}."
+            log.warning(msg)
+            return msg
+
         if labels is None:
             labels = ["needs-refinement"]
 
