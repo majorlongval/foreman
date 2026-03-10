@@ -22,7 +22,7 @@ from github import Github
 
 from brain_tools import TOOL_SCHEMAS, execute_tool, get_project_status
 from cost_monitor import CostTracker
-from llm_client import get_embedding, cosine_similarity, is_duplicate_issue
+from llm_client import LLMClient
 
 # ─── Configuration ────────────────────────────────────────────
 
@@ -48,6 +48,16 @@ log = logging.getLogger("foreman.brain")
 # ─── Cost Tracking ────────────────────────────────────────────
 
 _cost_tracker = CostTracker(ceiling_usd=BRAIN_COST_CEILING)
+
+# ─── LLM Client (lazy-init) ───────────────────────────────────
+
+_llm_client = None
+
+def _get_llm_client():
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = LLMClient()
+    return _llm_client
 
 # ─── GitHub (lazy-init) ──────────────────────────────────────
 
@@ -191,16 +201,21 @@ def process_message(user_message: str, chat_data: dict) -> str:
                 if block.name == "create_issue":
                     title = block.input.get("title", "")
                     body = block.input.get("body", "")
-                    # Fix: pass repo, title, body, threshold to is_duplicate_issue
-                    duplicate, similar_id = is_duplicate_issue(
-                        repo,
-                        title,
-                        body,
-                        SIMILARITY_THRESHOLD
+                    # Fetch existing issues to build embeddings
+                    issues = list(repo.get_issues(state="open"))
+                    llm = _get_llm_client()
+                    existing_texts = [f"{i.title}\n{i.body}" for i in issues]
+                    existing_embeddings = [llm.embed(t) for t in existing_texts]
+                    
+                    duplicate, similar_idx = llm.is_duplicate_issue(
+                        f"{title}\n{body}",
+                        existing_embeddings,
+                        threshold=SIMILARITY_THRESHOLD
                     )
                     if duplicate:
-                        log.info(f"Aborting creation of duplicate issue: '{title}' (Similar to {similar_id})")
-                        result = f"Aborted: This issue appears too similar to existing {similar_id}."
+                        similar_id = issues[similar_idx].number
+                        log.info(f"Aborting creation of duplicate issue: '{title}' (Similar to #{similar_id})")
+                        result = f"Aborted: This issue appears too similar to existing #{similar_id}."
                     else:
                         result = execute_tool(block.name, block.input, repo)
                 else:
