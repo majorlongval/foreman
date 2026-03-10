@@ -320,7 +320,7 @@ class PRReviewer:
             files = self.get_changed_files(pr)
 
             # Truncate massive diffs to avoid blowing context
-            MAX_DIFF_CHARS = 50000
+            MAX_DIFF_CHARS = 100000
             original_len = len(diff)
             if original_len > MAX_DIFF_CHARS:
                 diff = diff[:MAX_DIFF_CHARS] + f"\n\n... [TRUNCATED — {original_len} chars total, showing first {MAX_DIFF_CHARS}]"
