@@ -32,6 +32,7 @@ Usage:
 import os
 import logging
 from dataclasses import dataclass
+from typing import List
 
 log = logging.getLogger("foreman.llm")
 
@@ -73,6 +74,8 @@ PRICING = {
     "openai/gpt-4o":                       (2.50, 10.0),
     "openai/gpt-4o-mini":                  (0.15, 0.60),
     "openai/o3-mini":                      (1.10, 4.40),
+    "openai/text-embedding-3-small":       (0.02, 0.0),
+    "openai/text-embedding-3-large":       (0.13, 0.0),
 
     # Groq (fast inference)
     "groq/llama-3.3-70b-versatile":        (0.59, 0.79),
@@ -90,292 +93,196 @@ def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> floa
         provider = model_key.split("/")[0]
         if provider in ("ollama", "lmstudio", "local"):
             return 0.0
-        log.warning(f"No pricing data for {model_key}, estimating $0")
+        log.warning(f"No pricing found for model {model_key}, using 0.0")
         return 0.0
-    input_price, output_price = pricing
-    return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
+    
+    in_cost = (input_tokens / 1_000_000) * pricing[0]
+    out_cost = (output_tokens / 1_000_000) * pricing[1]
+    return in_cost + out_cost
 
 
-# ─── Provider Backends ───────────────────────────────────────
+# ─── Client ──────────────────────────────────────────────────
 
-class AnthropicBackend:
+class LLMClient:
     def __init__(self):
-        import anthropic
-        self.client = anthropic.Anthropic(
-            api_key=os.environ.get("ANTHROPIC_API_KEY")
+        self.default_model = os.getenv("LLM_MODEL", "openai/gpt-4o")
+        self.embedding_model = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-small")
+
+    def complete(self, system: str, message: str, model: str = None, max_tokens: int = 4000) -> LLMResponse:
+        """Standard completion interface."""
+        target_model = model or self.default_model
+        provider = target_model.split("/")[0]
+        
+        try:
+            if provider == "openai":
+                return self._openai_complete(target_model, system, message, max_tokens)
+            elif provider == "anthropic":
+                return self._anthropic_complete(target_model, system, message, max_tokens)
+            elif provider == "gemini":
+                return self._gemini_complete(target_model, system, message, max_tokens)
+            elif provider == "groq":
+                return self._groq_complete(target_model, system, message, max_tokens)
+            elif provider in ("ollama", "local"):
+                return self._openai_complete(target_model, system, message, max_tokens, base_url=os.getenv("LOCAL_LLM_URL", "http://localhost:11434/v1"))
+            else:
+                raise ValueError(f"Unknown provider: {provider}")
+        except Exception as e:
+            log.error(f"LLM completion failed for {target_model}: {e}")
+            raise
+
+    def get_embedding(self, text: str, model: str = None) -> List[float]:
+        """
+        Generate an embedding vector for the provided text.
+        Defaults to OpenAI text-embedding-3-small or EMBEDDING_MODEL env var.
+        """
+        target_model = model or self.embedding_model
+        provider = target_model.split("/")[0]
+        
+        try:
+            log.info(f"Generating embedding using {target_model}")
+            if provider == "openai":
+                return self._openai_embedding(target_model, text)
+            elif provider == "gemini":
+                return self._gemini_embedding(target_model, text)
+            else:
+                # Fallback to OpenAI-compatible for other providers if they support it
+                return self._openai_embedding(target_model, text)
+        except Exception as e:
+            log.error(f"Embedding generation failed for {target_model}: {e}")
+            raise
+
+    # ─── Provider Implementations ────────────────────────────
+
+    def _openai_complete(self, model: str, system: str, message: str, max_tokens: int, base_url: str = None) -> LLMResponse:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), base_url=base_url)
+        
+        model_name = model.split("/", 1)[1] if "/" in model else model
+        
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": message}
+            ],
+            max_tokens=max_tokens,
+        )
+        
+        in_tokens = response.usage.prompt_tokens
+        out_tokens = response.usage.completion_tokens
+        
+        return LLMResponse(
+            text=response.choices[0].message.content,
+            model=model,
+            provider="openai",
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            cost_usd=estimate_cost(model, in_tokens, out_tokens),
+            raw=response
         )
 
-    def complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
-        response = self.client.messages.create(
-            model=model,
+    def _openai_embedding(self, model: str, text: str) -> List[float]:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        model_name = model.split("/", 1)[1] if "/" in model else model
+        
+        response = client.embeddings.create(
+            input=text,
+            model=model_name
+        )
+        return response.data[0].embedding
+
+    def _anthropic_complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        
+        model_name = model.split("/", 1)[1]
+        
+        response = client.messages.create(
+            model=model_name,
             max_tokens=max_tokens,
             system=system,
-            messages=[{"role": "user", "content": message}],
+            messages=[{"role": "user", "content": message}]
         )
-        model_key = f"anthropic/{model}"
+        
+        in_tokens = response.usage.input_tokens
+        out_tokens = response.usage.output_tokens
+        
         return LLMResponse(
             text=response.content[0].text,
             model=model,
             provider="anthropic",
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            cost_usd=estimate_cost(model_key, response.usage.input_tokens, response.usage.output_tokens),
-            raw=response,
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            cost_usd=estimate_cost(model, in_tokens, out_tokens),
+            raw=response
         )
 
-
-class GeminiBackend:
-    def __init__(self):
-        from google import genai
-        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        self.client = genai.Client(api_key=api_key)
-
-    def complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
-        from google.genai import types
-
-        config_kwargs = dict(
-            system_instruction=system,
-            max_output_tokens=max_tokens,
+    def _gemini_complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
+        import google.generativeai as genai
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        
+        model_name = model.split("/", 1)[1]
+        gemini_model = genai.GenerativeModel(
+            model_name=model_name,
+            system_instruction=system
         )
-        # Flash supports disabling thinking (saves tokens); Pro requires it
-        if "flash" in model.lower():
-            config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-
-        response = self.client.models.generate_content(
-            model=model,
-            contents=message,
-            config=types.GenerateContentConfig(**config_kwargs),
+        
+        response = gemini_model.generate_content(
+            message,
+            generation_config=genai.types.GenerationConfig(max_output_tokens=max_tokens)
         )
-
-        # Extract token counts from usage metadata
-        usage = response.usage_metadata
-        input_tokens = usage.prompt_token_count or 0
-        output_tokens = usage.candidates_token_count or 0
-
-        text = response.text
-        if text is None:
-            # Response was blocked or empty — log finish reason for debugging
-            try:
-                reason = response.candidates[0].finish_reason
-                log.warning(f"  Gemini returned None text, finish_reason={reason}")
-            except Exception:
-                log.warning("  Gemini returned None text (no candidates)")
-            text = ""
-
-        model_key = f"gemini/{model}"
+        
+        # Gemini usage metadata
+        in_tokens = response.usage_metadata.prompt_token_count
+        out_tokens = response.usage_metadata.candidates_token_count
+        
         return LLMResponse(
-            text=text,
+            text=response.text,
             model=model,
             provider="gemini",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=estimate_cost(model_key, input_tokens, output_tokens),
-            raw=response,
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            cost_usd=estimate_cost(model, in_tokens, out_tokens),
+            raw=response
         )
 
+    def _gemini_embedding(self, model: str, text: str) -> List[float]:
+        import google.generativeai as genai
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        model_name = model.split("/", 1)[1] if "/" in model else "models/text-embedding-004"
+        
+        response = genai.embed_content(
+            model=model_name,
+            content=text,
+            task_type="retrieval_document"
+        )
+        return response['embedding']
 
-class OpenAICompatBackend:
-    """Works with OpenAI, Groq, Together, LM Studio, Ollama, and any
-    OpenAI-compatible API endpoint."""
-
-    # Known base URLs for different providers
-    BASE_URLS = {
-        "openai": "https://api.openai.com/v1",
-        "groq": "https://api.groq.com/openai/v1",
-        "together": "https://api.together.xyz/v1",
-        "ollama": "http://localhost:11434/v1",
-        "lmstudio": "http://localhost:1234/v1",
-    }
-
-    # Env var names for API keys per provider
-    KEY_VARS = {
-        "openai": "OPENAI_API_KEY",
-        "groq": "GROQ_API_KEY",
-        "together": "TOGETHER_API_KEY",
-        "ollama": None,  # no key needed
-        "lmstudio": None,
-    }
-
-    def __init__(self, provider: str):
-        import openai
-        self.provider = provider
-        base_url = self.BASE_URLS.get(provider)
-        key_var = self.KEY_VARS.get(provider)
-        api_key = os.environ.get(key_var) if key_var else "not-needed"
-
-        # Allow override via env
-        base_url = os.environ.get(f"{provider.upper()}_BASE_URL", base_url)
-
-        self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
-
-    def complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
-        response = self.client.chat.completions.create(
-            model=model,
-            max_tokens=max_tokens,
+    def _groq_complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
+        from groq import Groq
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        
+        model_name = model.split("/", 1)[1]
+        
+        response = client.chat.completions.create(
+            model=model_name,
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": message},
+                {"role": "user", "content": message}
             ],
+            max_tokens=max_tokens,
         )
-
-        choice = response.choices[0]
-        usage = response.usage
-        input_tokens = usage.prompt_tokens if usage else 0
-        output_tokens = usage.completion_tokens if usage else 0
-
-        model_key = f"{self.provider}/{model}"
+        
+        in_tokens = response.usage.prompt_tokens
+        out_tokens = response.usage.completion_tokens
+        
         return LLMResponse(
-            text=choice.message.content,
+            text=response.choices[0].message.content,
             model=model,
-            provider=self.provider,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=estimate_cost(model_key, input_tokens, output_tokens),
-            raw=response,
+            provider="groq",
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            cost_usd=estimate_cost(model, in_tokens, out_tokens),
+            raw=response
         )
-
-
-# ─── Unified Client ──────────────────────────────────────────
-
-class LLMClient:
-    """Provider-agnostic LLM client.
-
-    Usage:
-        llm = LLMClient()
-        resp = llm.complete("gemini/gemini-2.5-flash", "You are...", "Do X", 2000)
-    """
-
-    def __init__(self):
-        self._backends = {}  # lazy-loaded
-
-    def _get_backend(self, provider: str):
-        """Lazy-load and cache backends."""
-        if provider not in self._backends:
-            if provider == "anthropic":
-                self._backends[provider] = AnthropicBackend()
-            elif provider == "gemini":
-                self._backends[provider] = GeminiBackend()
-            elif provider in ("openai", "groq", "together", "ollama", "lmstudio"):
-                self._backends[provider] = OpenAICompatBackend(provider)
-            else:
-                raise ValueError(
-                    f"Unknown provider: '{provider}'. "
-                    f"Use: anthropic, gemini, openai, groq, together, ollama, lmstudio"
-                )
-            log.info(f"  Initialized {provider} backend")
-        return self._backends[provider]
-
-    def complete(
-        self,
-        model: str,
-        system: str,
-        message: str,
-        max_tokens: int = 2000,
-    ) -> LLMResponse:
-        """Send a completion request to any supported provider.
-
-        Args:
-            model: "provider/model-name" format (e.g. "gemini/gemini-2.5-flash")
-            system: System prompt
-            message: User message
-            max_tokens: Max response tokens
-
-        Returns:
-            LLMResponse with text, token counts, and cost estimate
-        """
-        if "/" not in model:
-            raise ValueError(
-                f"Model must be in 'provider/model' format, got: '{model}'. "
-                f"Example: 'anthropic/claude-sonnet-4-20250514'"
-            )
-
-        provider, model_name = model.split("/", 1)
-        backend = self._get_backend(provider)
-
-        log.info(f"  🤖 {provider}/{model_name} (max {max_tokens} tokens)")
-        response = backend.complete(model_name, system, message, max_tokens)
-
-        log.info(
-            f"  ✓ {response.input_tokens} in / {response.output_tokens} out "
-            f"= ${response.cost_usd:.4f}"
-        )
-        return response
-
-
-# ─── Model Router ─────────────────────────────────────────────
-
-# Predefined routing profiles — maps task types to models
-ROUTING_PROFILES = {
-    "cheap": {
-        # 3.1 Flash for decisions, Flash Lite for cheap mechanical tasks
-        "refine": "gemini/gemini-3-flash-preview",
-        "brainstorm": "gemini/gemini-3-flash-preview",
-        "review": "gemini/gemini-3-flash-preview",
-        "review_confirm": "gemini/gemini-3.1-pro-preview",
-        "title_gen": "gemini/gemini-3.1-flash-lite-preview",
-        "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
-        "implement": "gemini/gemini-3-flash-preview",
-        "plan": "gemini/gemini-3-flash-preview",
-    },
-    "balanced": {
-        # Balance cost and quality
-        "refine": "anthropic/claude-sonnet-4-20250514",
-        "brainstorm": "anthropic/claude-sonnet-4-20250514",
-        "review": "anthropic/claude-sonnet-4-20250514",
-        "review_confirm": "anthropic/claude-opus-4-20250514",
-        "title_gen": "gemini/gemini-3.1-flash-lite-preview",
-        "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
-        "implement": "anthropic/claude-sonnet-4-20250514",
-        "plan": "anthropic/claude-opus-4-20250514",
-    },
-    "quality": {
-        # Maximize quality — use best models everywhere
-        "refine": "anthropic/claude-sonnet-4-20250514",
-        "brainstorm": "anthropic/claude-opus-4-20250514",
-        "review": "anthropic/claude-opus-4-20250514",
-        "review_confirm": "anthropic/claude-opus-4-20250514",
-        "title_gen": "anthropic/claude-sonnet-4-20250514",
-        "commit_msg": "anthropic/claude-sonnet-4-20250514",
-        "implement": "anthropic/claude-opus-4-20250514",
-        "plan": "anthropic/claude-opus-4-20250514",
-    },
-}
-
-
-class ModelRouter:
-    """Routes tasks to appropriate models based on a routing profile.
-
-    Usage:
-        router = ModelRouter("cheap")  # or "balanced" or "quality"
-        model = router.get("refine")   # → "gemini/gemini-2.5-flash"
-
-        # Override specific routes:
-        router = ModelRouter("cheap", overrides={"brainstorm": "anthropic/claude-opus-4-20250514"})
-    """
-
-    def __init__(self, profile: str = "balanced", overrides: dict = None):
-        if profile not in ROUTING_PROFILES:
-            raise ValueError(f"Unknown profile: '{profile}'. Use: {list(ROUTING_PROFILES.keys())}")
-
-        self.profile_name = profile
-        self.routes = {**ROUTING_PROFILES[profile]}
-
-        if overrides:
-            self.routes.update(overrides)
-            log.info(f"  Router: {profile} profile with overrides: {overrides}")
-        else:
-            log.info(f"  Router: {profile} profile")
-
-    def get(self, task: str) -> str:
-        """Get the model string for a task type."""
-        if task not in self.routes:
-            log.warning(f"  No route for task '{task}', falling back to refine model")
-            return self.routes.get("refine", "anthropic/claude-sonnet-4-20250514")
-        return self.routes[task]
-
-    def summary(self) -> str:
-        lines = [f"Router profile: {self.profile_name}"]
-        for task, model in sorted(self.routes.items()):
-            pricing = PRICING.get(model, (0, 0))
-            lines.append(f"  {task:12s} → {model:45s} (${pricing[0]:.2f}/${pricing[1]:.2f} per 1M)")
-        return "\n".join(lines)
