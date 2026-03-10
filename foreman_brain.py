@@ -272,7 +272,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"  /new — fresh conversation\n"
         f"  /switch owner/repo — change repo\n"
         f"  /status — quick project status\n"
-        f"  /cost — session cost summary\n\n"
+        f"  /cost — session cost summary\n"
+        f"  /stop — shut down the bot\n\n"
         f"Or just send a message to chat."
     )
 
@@ -333,6 +334,18 @@ async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_chat.id):
         return
     await update.message.reply_text(_cost_tracker.summary())
+
+
+async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /stop — shut down the bot gracefully."""
+    if not is_allowed(update.effective_chat.id):
+        return
+    await update.message.reply_text(
+        f"Shutting down. {_cost_tracker.summary()}"
+    )
+    # Send SIGINT to trigger clean shutdown (same as Ctrl+C)
+    import signal
+    os.kill(os.getpid(), signal.SIGINT)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -414,6 +427,7 @@ def main():
     app.add_handler(CommandHandler("switch", cmd_switch))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("cost", cmd_cost))
+    app.add_handler(CommandHandler("stop", cmd_stop))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     log.info("Polling for updates...")
