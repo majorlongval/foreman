@@ -158,15 +158,19 @@ TOOL_SCHEMAS = [
 
 # ─── Utility Functions ───────────────────────────────────────
 
+_EMBEDDING_CACHE = {}
 def _get_embedding(text):
-    """Generate text embedding using OpenAI API."""
+    """Generate text embedding using LLMClient."""
+    if text in _EMBEDDING_CACHE:
+        return _EMBEDDING_CACHE[text]
     try:
-        client = openai.OpenAI()
-        response = client.embeddings.create(
-            input=text,
-            model="text-embedding-3-small"
-        )
-        return response.data[0].embedding
+        from llm_client import LLMClient, ModelRouter
+        client = LLMClient()
+        router = ModelRouter()
+        model = router.get_model("embed")
+        embedding = client.embed(model, text)
+        _EMBEDDING_CACHE[text] = embedding
+        return embedding
     except Exception as e:
         log.error(f"Error generating embedding: {e}")
         return None
@@ -192,8 +196,8 @@ def _is_duplicate_issue(repo, title, body):
         new_embedding = _get_embedding(new_content)
         if not new_embedding:
             return None
-
-        open_issues = list(repo.get_issues(state="open"))
+        # Fetch only the 50 most recently updated issues to avoid hitting API rate limits
+        open_issues = list(repo.get_issues(state="open", sort="updated", direction="desc")[:50])
         real_issues = [i for i in open_issues if i.pull_request is None]
 
         for existing_issue in real_issues:
