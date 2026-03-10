@@ -64,6 +64,7 @@ log = logging.getLogger("foreman")
 from cost_monitor import CostTracker, CloudCostMonitor, create_cost_system
 from llm_client import LLMClient, ModelRouter
 from telegram_notifier import notify as tg
+from agent_state import state, AgentState
 
 
 # ─── Vision Loader ───────────────────────────────────────────
@@ -89,391 +90,451 @@ class GitHubClient:
         self.gh = Github(token)
         self.repo = self.gh.get_repo(repo_name)
         self.dry_run = dry_run
-        self._ensure_labels()
-
-    def _ensure_labels(self):
-        """Create our labels if they don't exist."""
-        existing = {l.name for l in self.repo.get_labels()}
-        label_configs = {
-            LABEL_NEEDS_REFINEMENT: "fbca04",  # yellow
-            LABEL_AUTO_REFINED: "0e8a16",      # green
-            LABEL_REFINED_OUT: "e4e669",       # muted yellow — closed originals
-            LABEL_DRAFT: "c5def5",              # light blue
-            LABEL_READY: "0075ca",              # blue — ready for implementation
-        }
-        for name, color in label_configs.items():
-            if name not in existing:
-                if not self.dry_run:
-                    self.repo.create_label(name=name, color=color)
-                log.info(f"  Created label: {name}")
-
-    def get_refinement_queue(self) -> list:
-        """Get open issues labeled 'needs-refinement', excluding forbidden labels."""
-        issues = self.repo.get_issues(
-            state="open",
-            labels=[self.repo.get_label(LABEL_NEEDS_REFINEMENT)],
-            sort="created",
-            direction="asc",
-        )
-        safe_issues = []
-        for issue in issues:
-            issue_labels = {l.name for l in issue.labels}
-            if issue_labels & FORBIDDEN_LABELS:
-                log.warning(f"  ⛔ Skipping #{issue.number} — has forbidden label: {issue_labels & FORBIDDEN_LABELS}")
-                continue
-            safe_issues.append(issue)
-        return safe_issues
-
-    def get_all_open_issues(self) -> list:
-        """Get all open issues for context (brainstorm dedup)."""
-        return list(self.repo.get_issues(state="open"))
-
-    def get_closed_issues(self, count: int = 50) -> list:
-        """Get recently closed issues for context."""
-        return list(self.repo.get_issues(state="closed", sort="updated", direction="desc")[:count])
-
-    def create_refined_issue(self, original_issue, refined_body: str, refined_title: str) -> int:
-        """Create a new refined issue and close the original with a link."""
+        log.info(f"GitHub client initialized for repo '{repo_name}'")
         if self.dry_run:
-            log.info(f"  [DRY RUN] Would create refined issue from #{original_issue.number}")
-            log.info(f"  [DRY RUN] Title: {refined_title}")
-            return -1
+            log.warning("DRY RUN mode is enabled. No changes will be made to GitHub.")
 
-        # Create new issue
-        new_issue = self.repo.create_issue(
-            title=refined_title,
-            body=refined_body + f"\n\n---\n_Auto-refined from #{original_issue.number}_",
-            labels=[self.repo.get_label(LABEL_AUTO_REFINED)],
-        )
+    def get_issues_by_label(self, label: str):
+        return self.repo.get_issues(state="open", labels=[label])
 
-        # Close original with cross-reference
-        original_issue.add_to_labels(self.repo.get_label(LABEL_REFINED_OUT))
-        original_issue.remove_from_labels(self.repo.get_label(LABEL_NEEDS_REFINEMENT))
-        original_issue.create_comment(
-            f"🤖 Refined by FOREMAN → #{new_issue.number}\n\n"
-            f"This issue has been closed because a structured version was created. "
-            f"The original content is preserved here for audit purposes."
-        )
-        original_issue.edit(state="closed", state_reason="completed")
+    def get_issue_by_number(self, number: int):
+        try:
+            return self.repo.get_issue(number=number)
+        except GithubException as e:
+            if e.status == 404:
+                log.error(f"Issue #{number} not found.")
+                return None
+            raise
 
-        log.info(f"  ✅ #{original_issue.number} → #{new_issue.number} (original closed)")
-        return new_issue.number
+    def find_similar_issue(self, title: str):
+        """Finds an open issue with a similar title."""
+        # This is a very basic search, could be improved with embeddings etc.
+        query = f'repo:"{self.repo.full_name}" is:issue is:open "{title}"'
+        results = self.gh.search_issues(query)
+        if results.totalCount > 0:
+            # Check for a very close match to avoid false positives
+            for issue in results:
+                if issue.title.lower().strip() == title.lower().strip():
+                    return issue
+        return None
 
-    def create_draft_issues(self, drafts: list[dict]) -> list[int]:
-        """Create draft issues from brainstorm output."""
-        created = []
-        for draft in drafts:
-            if self.dry_run:
-                log.info(f"  [DRY RUN] Would create draft: {draft['title']}")
-                created.append(-1)
-                continue
+    def create_issue(self, title, body, labels):
+        if self.dry_run:
+            log.info(f"[DRY RUN] Would create issue '{title}' with labels {labels}")
+            log.info(f"Body:\n---\n{body}\n---")
+            return None  # Can't return a fake issue object easily, so caller must handle None
 
-            issue = self.repo.create_issue(
-                title=draft["title"],
-                body=draft["body"] + "\n\n---\n_Auto-generated by FOREMAN brainstorm mode_",
-                labels=[self.repo.get_label(LABEL_DRAFT)],
-            )
-            log.info(f"  📝 Created draft #{issue.number}: {draft['title']}")
-            created.append(issue.number)
-        return created
+        log.info(f"Creating issue '{title}' with labels {labels}")
+        return self.repo.create_issue(title=title, body=body, labels=labels)
+
+    def update_issue(self, issue_number, title=None, body=None):
+        if self.dry_run:
+            log.info(f"[DRY RUN] Would update issue #{issue_number}")
+            if title: log.info(f"  New title: {title}")
+            if body: log.info(f"  New body:\n---\n{body}\n---")
+            return
+
+        issue = self.get_issue_by_number(issue_number)
+        if issue:
+            log.info(f"Updating issue #{issue_number}: '{title}'")
+            args = {}
+            if title: args["title"] = title
+            if body: args["body"] = body
+            issue.edit(**args)
+
+    def add_comment_to_issue(self, issue_number, comment):
+        if self.dry_run:
+            log.info(f"[DRY RUN] Would add comment to issue #{issue_number}:\n---\n{comment}\n---")
+            return
+
+        issue = self.get_issue_by_number(issue_number)
+        if issue:
+            log.info(f"Adding comment to issue #{issue_number}")
+            issue.create_comment(comment)
+
+    def close_issue(self, issue_number):
+        if self.dry_run:
+            log.info(f"[DRY RUN] Would close issue #{issue_number}")
+            return
+
+        issue = self.get_issue_by_number(issue_number)
+        if issue:
+            log.info(f"Closing issue #{issue_number}")
+            issue.edit(state="closed")
+
+    def add_labels_to_issue(self, issue_number, labels):
+        if self.dry_run:
+            log.info(f"[DRY RUN] Would add labels {labels} to issue #{issue_number}")
+            return
+
+        issue = self.get_issue_by_number(issue_number)
+        if issue:
+            log.info(f"Adding labels {labels} to issue #{issue_number}")
+            issue.add_to_labels(*labels)
+
+    def remove_label_from_issue(self, issue_number, label):
+        if self.dry_run:
+            log.info(f"[DRY RUN] Would remove label '{label}' from issue #{issue_number}")
+            return
+
+        issue = self.get_issue_by_number(issue_number)
+        if issue:
+            # Check if label exists before trying to remove
+            if any(l.name == label for l in issue.get_labels()):
+                log.info(f"Removing label '{label}' from issue #{issue_number}")
+                issue.remove_from_labels(label)
+            else:
+                log.warning(f"Label '{label}' not found on issue #{issue_number}, cannot remove.")
 
 
-# ─── Claude Prompts ──────────────────────────────────────────
+# ─── Business Logic: Refine ───────────────────────────────────
 
-REFINE_SYSTEM = """You are FOREMAN, an autonomous agent that refines GitHub issues into 
-well-structured, actionable development tasks.
-
-You will receive an issue title and body. Rewrite it into the following structure:
-
-## Summary
-One-line description of what this task accomplishes.
-
-## Acceptance Criteria
-- [ ] Criterion 1 (specific, testable)
-- [ ] Criterion 2
-(minimum 3 criteria)
-
-## Steps to Reproduce (include ONLY if this is a bug)
-1. Step 1
-2. Step 2
-3. Expected vs actual behavior
-
-## Component/Area
-Which part of the system this touches. Choose from:
-agent-loop, github-integration, telegram-bot, dashboard, infrastructure, 
-vision, documentation, testing, ci-cd
-
-## Subtasks
-Break the work into concrete subtasks:
-- [ ] Subtask 1
-- [ ] Subtask 2
-(minimum 2 subtasks)
-
-## Complexity Estimate
-- T-shirt size: XS / S / M / L / XL
-- Estimated API cost: low / medium / high
-
-Rules:
-- Keep the original intent but make it precise and actionable
-- If the original is vague, make reasonable assumptions and state them
-- Title should be imperative: "Add X", "Fix Y", "Implement Z"
-- Be concise. No filler. Every word earns its place.
+def format_issue_for_llm(issue) -> str:
+    """Creates a simplified text representation of a GitHub issue."""
+    return f"""
+Issue Title: {issue.title}
+Issue Number: {issue.number}
+Issue URL: {issue.html_url}
+Issue Body:
+{issue.body}
 """
 
-BRAINSTORM_SYSTEM = """You are FOREMAN, an autonomous agent that generates new development tasks
-for a self-improving dev pipeline project.
+def parse_llm_output(output: str) -> dict:
+    """
+    Parses the LLM's JSON output to extract structured issue data.
+    Handles markdown code fences.
+    """
+    try:
+        # Strip markdown fences if present
+        if output.startswith("```json"):
+            output = output[7:]
+        if output.endswith("```"):
+            output = output[:-3]
+        output = output.strip()
 
-You have access to:
-1. VISION.md — the project's north star (goals, roadmap, architecture)
-2. A list of existing open issues — so you don't create duplicates
-3. A list of recently completed issues — so you know what's done
+        data = json.loads(output)
 
-Your job: identify GAPS between the vision and current state, then propose
-new issues that move the project forward.
+        # Basic validation
+        if not all(k in data for k in ["title", "summary", "acceptance_criteria", "subtasks"]):
+            raise ValueError("Missing one or more required keys in LLM output.")
+        if not isinstance(data["title"], str) or not data["title"]:
+             raise ValueError("Title must be a non-empty string.")
 
-Rules:
-- Generate exactly {max_drafts} task proposals
-- Each task must be concrete and implementable in 1-4 hours
-- Don't duplicate existing open issues (check titles and descriptions)
-- Prioritize tasks from the CURRENT phase in the roadmap
-- If current phase is nearly complete, start proposing next-phase tasks
-- Focus on unblocking other work first (dependencies, infrastructure)
-
-For each task, output a JSON array of objects with:
-- "title": imperative title ("Add X", "Fix Y", "Implement Z")
-- "body": full issue body using the refined ticket structure from VISION.md
-- "reasoning": one sentence explaining WHY this task matters now (not included in issue)
-
-Output ONLY valid JSON. No markdown fences. No preamble."""
+        return data
+    except (json.JSONDecodeError, ValueError) as e:
+        log.error(f"Failed to parse LLM output: {e}\nRaw output:\n---\n{output}\n---")
+        return {}
 
 
-# ─── Agent Logic ─────────────────────────────────────────────
+def format_refined_issue_body(data: dict) -> str:
+    """Formats the structured data back into a markdown body for a new GitHub issue."""
+    body = f"## Summary\n{data['summary']}\n\n"
+    if data.get("acceptance_criteria"):
+        ac_list = "\n".join([f"- [ ] {item}" for item in data["acceptance_criteria"]])
+        body += f"## Acceptance Criteria\n{ac_list}\n\n"
+    if data.get("component_area"):
+        body += f"## Component/Area\n{data['component_area']}\n\n"
+    if data.get("subtasks"):
+        st_list = "\n".join([f"- [ ] {item}" for item in data["subtasks"]])
+        body += f"## Subtasks\n{st_list}\n\n"
+    if data.get("complexity_estimate"):
+        body += "## Complexity Estimate\n"
+        body += f"- T-shirt size: {data['complexity_estimate'].get('t_shirt_size', 'N/A')}\n"
+        body += f"- Estimated API cost: {data['complexity_estimate'].get('api_cost', 'N/A')}\n\n"
 
-class ForemanAgent:
-    def __init__(self, github: GitHubClient, dry_run: bool = False):
-        self.github = github
-        self.llm = LLMClient()
-        self.router = ModelRouter(ROUTING_PROFILE)
-        self.cost = CostTracker(ceiling_usd=COST_CEILING_USD)
-        self.vision = load_vision()
-        self.dry_run = dry_run
-        self.stats = {"refined": 0, "brainstormed": 0, "skipped": 0, "failed": 0}
+    # Add a reference back to the original issue
+    if data.get("original_issue_number"):
+        body += f"---\n_Auto-refined from #{data['original_issue_number']}_"
 
-        log.info(f"\n{self.router.summary()}\n")
+    return body.strip()
 
-    def _complete(self, task: str, system: str, message: str, max_tokens: int = 2000):
-        """Unified completion that routes to the right model and tracks cost."""
-        model = self.router.get(task)
-        response = self.llm.complete(model, system, message, max_tokens)
 
-        # Record in cost tracker (create a duck-typed usage object)
-        class _Usage:
-            def __init__(self, inp, out):
-                self.input_tokens = inp
-                self.output_tokens = out
-        self.cost.record(model, _Usage(response.input_tokens, response.output_tokens),
-                         agent="seed", action=task)
-        return response
+def refine_issue(llm: LLMClient, gh_client: GitHubClient, issue):
+    """
+    Processes a single issue: sends to LLM, parses response, and creates a new issue.
+    """
+    log.info(f"Processing issue #{issue.number}: '{issue.title}'")
+    issue_text = format_issue_for_llm(issue)
 
-    def refine_issue(self, issue) -> bool:
-        """Refine a single issue. Returns True on success."""
-        log.info(f"🔧 Refining #{issue.number}: {issue.title}")
+    # Simple check for labels that indicate we should skip this issue
+    current_labels = {label.name for label in issue.labels}
+    if not FORBIDDEN_LABELS.isdisjoint(current_labels):
+        log.warning(f"Skipping issue #{issue.number} due to forbidden labels: {current_labels.intersection(FORBIDDEN_LABELS)}")
+        return
 
-        try:
-            response = self._complete(
-                task="refine",
-                system=REFINE_SYSTEM,
-                message=(
-                    f"Issue Title: {issue.title}\n\n"
-                    f"Issue Body:\n{issue.body or '(empty)'}\n\n"
-                    f"Labels: {', '.join(l.name for l in issue.labels)}"
-                ),
-            )
+    # Check for self-reference which can cause loops
+    if f"_Auto-refined from #{issue.number}_" in issue.body:
+        log.warning(f"Skipping issue #{issue.number} as it appears to be a refinement of itself.")
+        return
 
-            if not self.cost.check_ceiling():
-                return False
+    # Use a system prompt from a file
+    system_prompt = Path("prompts/refine_issue.md").read_text()
 
-            refined_body = response.text
+    # Call the LLM
+    try:
+        response_text = llm.chat(system_prompt, issue_text, json_mode=True)
+    except Exception as e:
+        log.error(f"LLM API call failed for issue #{issue.number}: {e}")
+        return
 
-            # Extract a better title — route to title_gen (usually cheapest model)
-            title_response = self._complete(
-                task="title_gen",
-                system="Generate ONLY an imperative title. No explanation. No quotes. Maximum 10 words.",
-                message=f"Generate a title for this issue:\n\n{refined_body}",
-                max_tokens=500,
-            )
-            refined_title = title_response.text.strip().strip('"').strip("'")
-
-            self.github.create_refined_issue(issue, refined_body, refined_title)
-            self.stats["refined"] += 1
-            tg(f"✅ Refined #{issue.number}: <b>{refined_title}</b>")
-            return True
-
-        except Exception as e:
-            log.error(f"  ❌ Failed to refine #{issue.number}: {e}")
-            self.stats["failed"] += 1
-            return False
-
-    def brainstorm(self) -> list[int]:
-        """Generate draft issues from VISION.md + current state."""
-        log.info("🧠 Entering BRAINSTORM mode")
-
-        if not self.vision:
-            log.warning("  Cannot brainstorm without VISION.md")
-            return []
-
-        # Gather context
-        open_issues = self.github.get_all_open_issues()
-        closed_issues = self.github.get_closed_issues(30)
-
-        open_summary = "\n".join(
-            f"- #{i.number} [{', '.join(l.name for l in i.labels)}] {i.title}"
-            for i in open_issues
+    # Parse the response
+    refined_data = parse_llm_output(response_text)
+    if not refined_data:
+        # Parsing failed, error already logged. Add a comment to the issue.
+        gh_client.add_comment_to_issue(
+            issue.number,
+            "⚠️ **Auto-refinement failed:** The LLM output could not be parsed. Please check the agent logs."
         )
-        closed_summary = "\n".join(
-            f"- #{i.number} [DONE] {i.title}"
-            for i in closed_issues
+        return
+
+    # Add original issue number for back-reference
+    refined_data["original_issue_number"] = issue.number
+
+    # Format the new issue body
+    new_title = refined_data["title"]
+    new_body = format_refined_issue_body(refined_data)
+    new_labels = [LABEL_AUTO_REFINED, LABEL_READY]
+
+    # Create the new issue
+    new_issue = gh_client.create_issue(new_title, new_body, new_labels)
+    if new_issue is None and not gh_client.dry_run:
+        log.error(f"Failed to create new issue for original issue #{issue.number}.")
+        return
+
+    new_issue_number = new_issue.number if new_issue else "DRY_RUN_ISSUE"
+    log.info(f"Successfully created refined issue #{new_issue_number} for original #{issue.number}")
+    tg(f"✅ Refined issue #{issue.number} -> #{new_issue_number}\n_{new_title}_")
+
+    # Post-creation actions: comment on and close the original issue
+    comment = f"✅ This issue has been auto-refined into a detailed specification: #{new_issue_number}"
+    gh_client.add_comment_to_issue(issue.number, comment)
+    gh_client.remove_label_from_issue(issue.number, LABEL_NEEDS_REFINEMENT)
+    gh_client.add_labels_to_issue(issue.number, [LABEL_REFINED_OUT])
+    gh_client.close_issue(issue.number)
+
+
+# ─── Business Logic: Brainstorm ───────────────────────────────
+
+def brainstorm_new_ideas(llm: LLMClient, gh_client: GitHubClient, vision: str):
+    """
+    Generates new draft issues based on the VISION.md file.
+    """
+    log.info("⛈️ Entering brainstorm mode...")
+
+    # 1. Get existing draft and ready issues to provide as context
+    draft_issues = gh_client.get_issues_by_label(LABEL_DRAFT)
+    ready_issues = gh_client.get_issues_by_label(LABEL_READY)
+    existing_issues_text = "Existing Draft Issues:\n"
+    for issue in draft_issues:
+        existing_issues_text += f"- #{issue.number}: {issue.title}\n"
+    existing_issues_text += "\nExisting Ready-for-Implementation Issues:\n"
+    for issue in ready_issues:
+        existing_issues_text += f"- #{issue.number}: {issue.title}\n"
+
+    # 2. Formulate the prompt
+    system_prompt = Path("prompts/brainstorm_issues.md").read_text()
+    user_prompt = f"""
+Here is the project vision:
+---
+{vision}
+---
+
+Here are the existing issues that are either in draft or ready for implementation. Do not suggest ideas that are already covered here.
+---
+{existing_issues_text}
+---
+
+Based on the vision, and avoiding the existing topics, please generate up to {BRAINSTORM_MAX_DRAFTS} new, actionable, and distinct ideas for GitHub issues.
+"""
+
+    # 3. Call the LLM
+    try:
+        response_text = llm.chat(system_prompt, user_prompt, json_mode=True)
+    except Exception as e:
+        log.error(f"LLM API call failed during brainstorm: {e}")
+        return
+
+    # 4. Parse the response
+    try:
+        ideas = json.loads(response_text)
+        if "ideas" not in ideas or not isinstance(ideas["ideas"], list):
+            raise ValueError("Expected a JSON object with an 'ideas' list.")
+    except (json.JSONDecodeError, ValueError) as e:
+        log.error(f"Failed to parse brainstorm LLM output: {e}\nRaw output:\n---\n{response_text}\n---")
+        return
+
+    # 5. Create draft issues
+    created_count = 0
+    for idea in ideas["ideas"]:
+        if "title" not in idea or "body" not in idea:
+            log.warning(f"Skipping malformed idea: {idea}")
+            continue
+
+        title = idea["title"]
+        body = idea["body"]
+
+        # Safety check: avoid creating duplicate issues
+        if gh_client.find_similar_issue(title):
+            log.warning(f"Skipping duplicate idea: '{title}'")
+            continue
+
+        new_issue = gh_client.create_issue(
+            title=f"[DRAFT] {title}",
+            body=body,
+            labels=[LABEL_DRAFT, LABEL_NEEDS_REFINEMENT]
         )
 
-        try:
-            response = self._complete(
-                task="brainstorm",
-                system=BRAINSTORM_SYSTEM.format(max_drafts=BRAINSTORM_MAX_DRAFTS),
-                message=(
-                    f"## VISION.md\n\n{self.vision}\n\n"
-                    f"## Open Issues\n\n{open_summary or '(none)'}\n\n"
-                    f"## Recently Completed\n\n{closed_summary or '(none)'}"
-                ),
-                max_tokens=4000,
-            )
+        if new_issue is not None or gh_client.dry_run:
+            created_count += 1
+            log.info(f"Created draft issue: '{title}'")
+            tg(f"💡 New draft issue created: [DRAFT] {title}")
 
-            if not self.cost.check_ceiling():
-                return []
+    log.info(f"Brainstorm session complete. Created {created_count} new draft issues.")
 
-            # Parse JSON response
-            raw = response.text.strip()
-            # Strip markdown fences if model adds them anyway
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1]
-            if raw.endswith("```"):
-                raw = raw.rsplit("```", 1)[0]
-            raw = raw.strip()
 
-            drafts = json.loads(raw)
+# ─── Main Loop ────────────────────────────────────────────────
 
-            # Log reasoning (not included in issues)
-            for d in drafts:
-                log.info(f"  💡 {d['title']} — {d.get('reasoning', 'no reason given')}")
+def main(
+    once: bool = False,
+    brainstorm_only: bool = False,
+    dry_run: bool = False,
+    force_refine_issue: int = 0,
+):
+    """
+    Main execution loop for the agent.
+    """
+    log.info("🚀 Foreman Seed Agent v0.1 initialized")
+    if dry_run:
+        log.warning("DRY RUN mode is ON. No changes will be persisted.")
 
-            created = self.github.create_draft_issues(drafts)
-            self.stats["brainstormed"] += len(created)
-            tg(f"🧠 Brainstormed {len(created)} new draft issues")
-            return created
+    state.set_state(AgentState.RUNNING)
 
-        except json.JSONDecodeError as e:
-            log.error(f"  ❌ Failed to parse brainstorm JSON: {e}")
-            log.error(f"  Raw response: {raw[:500]}")
-            self.stats["failed"] += 1
-            return []
-        except Exception as e:
-            log.error(f"  ❌ Brainstorm failed: {e}")
-            self.stats["failed"] += 1
-            return []
+    # Initialize components
+    if not GITHUB_TOKEN or not REPO_NAME:
+        log.critical("🚨 GITHUB_TOKEN and FOREMAN_REPO environment variables must be set.")
+        sys.exit(1)
 
-    def run_once(self, force_brainstorm: bool = False) -> dict:
-        """Run a single pass of the agent loop."""
-        log.info("=" * 60)
-        log.info(f"🔄 FOREMAN pass @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
+    gh_client = GitHubClient(GITHUB_TOKEN, REPO_NAME, dry_run=dry_run)
+    cost_tracker = CostTracker()
+    cloud_cost_monitor = CloudCostMonitor()
+    cost_system = create_cost_system(cost_tracker, cloud_cost_monitor)
+    llm = LLMClient(cost_tracker=cost_tracker, routing_profile=ROUTING_PROFILE)
+    vision = load_vision()
 
-        if not self.cost.check_ceiling():
-            log.warning("💤 Parked — cost ceiling reached")
-            tg(f"🚨 FOREMAN parked — cost ceiling ${COST_CEILING_USD:.2f} reached")
-            return self.stats
+    try:
+        while True:
+            # Check for paused state
+            while state.is_paused():
+                log.info("Agent is PAUSED. Waiting for resume command...")
+                time.sleep(15) # Check every 15 seconds
 
-        # Check refinement queue
-        queue = self.github.get_refinement_queue()
-        log.info(f"📋 Refinement queue: {len(queue)} issues")
+            log.info("Starting new agent cycle.")
 
-        if queue and not force_brainstorm:
-            # REFINE MODE
-            for issue in queue:
-                self.refine_issue(issue)
-                if not self.cost.check_ceiling():
-                    break
-                time.sleep(2)  # Be nice to APIs
-        elif len(queue) < BRAINSTORM_THRESHOLD or force_brainstorm:
-            # BRAINSTORM MODE — check open draft cap first
-            open_issues = self.github.get_all_open_issues()
-            open_count = len(open_issues)
-            if not force_brainstorm and open_count >= MAX_OPEN_DRAFTS:
-                log.info(f"  💤 Skipping brainstorm — {open_count} open issues >= cap ({MAX_OPEN_DRAFTS})")
+            # Check costs before proceeding
+            total_cost, cloud_cost = cost_system.get_total_cost()
+            log.info(f"Current costs - LLM: ${cost_tracker.get_total_cost():.4f}, Cloud: ${cloud_cost:.4f}, Total: ${total_cost:.4f}")
+            if total_cost > COST_CEILING_USD:
+                error_msg = f"EMERGENCY SHUTDOWN: Cost ceiling of ${COST_CEILING_USD:.2f} exceeded. Current total cost is ${total_cost:.2f}."
+                log.critical(error_msg)
+                tg(f"🚨 {error_msg}")
+                break
+
+            # --- Determine Mode: Refine or Brainstorm ---
+            mode = "REFINE" # Default mode
+            issues_to_refine = []
+
+            if force_refine_issue:
+                log.info(f"Forcing refinement for issue #{force_refine_issue}")
+                issue = gh_client.get_issue_by_number(force_refine_issue)
+                if issue:
+                    issues_to_refine = [issue]
+                else:
+                    log.error(f"Could not find issue #{force_refine_issue} to refine.")
+            elif brainstorm_only:
+                mode = "BRAINSTORM"
             else:
-                log.info(f"  Queue ({len(queue)}) below threshold ({BRAINSTORM_THRESHOLD}) — brainstorming")
-                self.brainstorm()
-        else:
-            log.info("  Nothing to do, waiting...")
+                # Standard logic: check if refinement is needed, otherwise maybe brainstorm
+                issues_to_refine = list(gh_client.get_issues_by_label(LABEL_NEEDS_REFINEMENT))
+                ready_issues = list(gh_client.get_issues_by_label(LABEL_READY))
 
-        log.info(f"📊 Stats: {self.stats}")
-        log.info(f"💰 {self.cost.summary()}")
-        return self.stats
+                if not issues_to_refine:
+                    log.info("No issues need refinement.")
+                    if len(ready_issues) < BRAINSTORM_THRESHOLD:
+                        mode = "BRAINSTORM"
+                    else:
+                        mode = "IDLE"
+                else:
+                    log.info(f"Found {len(issues_to_refine)} issues to refine.")
 
-    def run_loop(self):
-        """Run the agent in a continuous loop."""
-        log.info("🚀 FOREMAN agent starting")
-        log.info(f"   Repo: {REPO_NAME}")
-        log.info(f"   Poll interval: {POLL_INTERVAL_SEC}s")
-        log.info(f"   Brainstorm threshold: {BRAINSTORM_THRESHOLD}")
-        log.info(f"   Cost ceiling: ${COST_CEILING_USD:.2f}/session")
-        log.info(f"   Models: {self.router.summary()}")
-        log.info(f"   Dry run: {self.dry_run}")
+            # --- Execute Actions Based on Mode ---
+            if mode == "REFINE":
+                for issue in issues_to_refine:
+                    try:
+                        refine_issue(llm, gh_client, issue)
+                    except Exception as e:
+                        log.error(f"Failed to process issue #{issue.number}: {e}", exc_info=True)
+                        tg(f"⚠️ Error refining issue #{issue.number}: {e}")
 
-        try:
-            while True:
-                self.run_once()
-                log.info(f"💤 Sleeping {POLL_INTERVAL_SEC}s...")
-                time.sleep(POLL_INTERVAL_SEC)
-        except KeyboardInterrupt:
-            log.info("\n🛑 FOREMAN stopped by user")
-            log.info(f"📊 Final stats: {self.stats}")
-            log.info(f"💰 {self.cost.summary()}")
-            self.cost.save_session()
+            elif mode == "BRAINSTORM":
+                draft_count = len(list(gh_client.get_issues_by_label(LABEL_DRAFT)))
+                if draft_count >= MAX_OPEN_DRAFTS:
+                    log.warning(f"Skipping brainstorm: already {draft_count} open drafts (max: {MAX_OPEN_DRAFTS}).")
+                elif not vision:
+                    log.warning("Skipping brainstorm: VISION.md is missing.")
+                else:
+                    try:
+                        brainstorm_new_ideas(llm, gh_client, vision)
+                    except Exception as e:
+                        log.error(f"Brainstorming failed: {e}", exc_info=True)
+                        tg(f"⚠️ Error during brainstorming: {e}")
 
+            elif mode == "IDLE":
+                log.info("Pipeline is healthy. Nothing to do.")
 
-# ─── CLI ─────────────────────────────────────────────────────
+            if once or force_refine_issue:
+                break
 
-def main():
-    parser = argparse.ArgumentParser(description="FOREMAN Seed Agent")
-    parser.add_argument("--once", action="store_true", help="Single pass then exit")
-    parser.add_argument("--brainstorm-only", action="store_true", help="Force brainstorm mode")
-    parser.add_argument("--dry-run", action="store_true", help="Log actions without touching GitHub")
-    parser.add_argument("--profile", default=None, help="Routing profile: cheap, balanced, quality")
-    args = parser.parse_args()
+            log.info(f"Cycle complete. Sleeping for {POLL_INTERVAL_SEC} seconds...")
+            time.sleep(POLL_INTERVAL_SEC)
 
-    # Override routing profile from CLI if provided
-    global ROUTING_PROFILE
-    if args.profile:
-        ROUTING_PROFILE = args.profile
-
-    # Validate config
-    if not GITHUB_TOKEN:
-        log.error("❌ GITHUB_TOKEN not set")
-        sys.exit(1)
-    if not REPO_NAME:
-        log.error("❌ FOREMAN_REPO not set (e.g. 'youruser/foreman')")
-        sys.exit(1)
-
-    # API keys are validated lazily when a backend is first used.
-    # This means you only need keys for providers you actually route to.
-    # e.g. ROUTING_PROFILE=cheap with all-Gemini routing only needs GEMINI_API_KEY.
-
-    github = GitHubClient(GITHUB_TOKEN, REPO_NAME, dry_run=args.dry_run)
-    agent = ForemanAgent(github, dry_run=args.dry_run)
-
-    if args.once or args.brainstorm_only:
-        agent.run_once(force_brainstorm=args.brainstorm_only)
-    else:
-        agent.run_loop()
+    except KeyboardInterrupt:
+        log.info("👋 User requested exit. Shutting down.")
+    except Exception as e:
+        log.critical(f"💥 Unhandled exception in main loop: {e}", exc_info=True)
+        tg(f"💥 *CRITICAL ERROR* in agent loop: {e}")
+    finally:
+        state.set_state(AgentState.IDLE)
+        log.info("Agent shutdown complete.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="FOREMAN Seed Agent")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run the agent loop only once then exit.",
+    )
+    parser.add_argument(
+        "--brainstorm-only",
+        action="store_true",
+        help="Force the agent to run in brainstorm mode for one cycle.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run without making any actual changes to GitHub.",
+    )
+    parser.add_argument(
+        "--force-refine-issue",
+        type=int,
+        default=0,
+        help="Process a specific issue number and then exit.",
+    )
+    args = parser.parse_args()
+
+    main(
+        once=args.once,
+        brainstorm_only=args.brainstorm_only,
+        dry_run=args.dry_run,
+        force_refine_issue=args.force_refine_issue,
+    )
