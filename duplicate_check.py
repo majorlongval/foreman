@@ -16,26 +16,16 @@ class DuplicateChecker:
 
     def __init__(self, repo):
         self.repo = repo
-        self._open_issues_cache: Optional[List[Dict]] = None
+        self._open_issues_cache: Optional[Dict] = None
 
     def _get_embedding(self, text: str) -> List[float]:
         """
-        Generates an embedding for the given text using the Gemini API.
-        Uses the 'text-embedding-004' model by default.
+        Generates an embedding for the given text using the unified LLM client.
         """
         try:
-            from google import genai
-            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-            if not api_key:
-                log.error("GEMINI_API_KEY not found. Semantic check disabled.")
-                return []
-
-            client = genai.Client(api_key=api_key)
-            result = client.models.embed_content(
-                model="text-embedding-004",
-                contents=text,
-            )
-            return result.embeddings[0].values
+            from llm_client import LLMClient
+            client = LLMClient()
+            return client.generate_embedding(text)
         except Exception as e:
             log.error(f"Failed to generate embedding: {e}")
             return []
@@ -55,33 +45,41 @@ class DuplicateChecker:
         return dot_product / (magnitude1 * magnitude2)
 
     def _fetch_open_issues(self) -> List[Dict]:
-        """Fetch and cache titles and bodies of all open issues."""
-        if self._open_issues_cache is not None:
-            return self._open_issues_cache
-
+        """Fetch open issues from GitHub, caching embeddings to avoid redundant API calls."""
         try:
             log.info("Fetching open issues for semantic duplicate check...")
             issues = self.repo.get_issues(state="open")
-            self._open_issues_cache = []
             
+            if self._open_issues_cache is None or isinstance(self._open_issues_cache, list):
+                self._open_issues_cache = {}
+                
+            new_cache = {}
             for issue in issues:
                 if issue.pull_request:
+                    continue
+                
+                # Use cached embedding if available
+                if issue.number in self._open_issues_cache and self._open_issues_cache[issue.number]["title"] == issue.title:
+                    new_cache[issue.number] = self._open_issues_cache[issue.number]
                     continue
                 
                 content = f"{issue.title}\n{issue.body or ''}"
                 embedding = self._get_embedding(content)
                 
                 if embedding:
-                    self._open_issues_cache.append({
+                    new_cache[issue.number] = {
                         "number": issue.number,
                         "title": issue.title,
                         "embedding": embedding
-                    })
+                    }
             
+            self._open_issues_cache = new_cache
             log.info(f"Cached {len(self._open_issues_cache)} open issues for comparison.")
-            return self._open_issues_cache
+            return list(self._open_issues_cache.values())
         except Exception as e:
             log.error(f"Error fetching open issues: {e}")
+            if isinstance(self._open_issues_cache, dict):
+                return list(self._open_issues_cache.values())
             return []
 
     def is_duplicate(self, title: str, body: str) -> Optional[Dict]:
@@ -124,9 +122,13 @@ class DuplicateChecker:
             log.error(f"Error during duplicate check: {e}")
             return None
 
+_global_checker_cache = {}
+
 def is_duplicate_issue(repo, title: str, body: str) -> Optional[Dict]:
     """
     Orchestrator function for checking duplicates.
     """
-    checker = DuplicateChecker(repo)
-    return checker.is_duplicate(title, body)
+    repo_name = repo.full_name
+    if repo_name not in _global_checker_cache:
+        _global_checker_cache[repo_name] = DuplicateChecker(repo)
+    return _global_checker_cache[repo_name].is_duplicate(title, body)
