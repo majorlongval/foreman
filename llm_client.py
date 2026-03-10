@@ -9,7 +9,7 @@ Supports:
 All providers expose the same interface: complete(system, user_message) → LLMResponse
 
 Model strings use a "provider/model" format:
-  - "anthropic/claude-sonnet-4-20250514"
+  - "anthropic/claude-sonnet-4-6"
   - "gemini/gemini-2.5-flash"
   - "openai/gpt-4o"
   - "groq/llama-3.3-70b-versatile"
@@ -56,8 +56,8 @@ class LLMResponse:
 # Update these as pricing changes. Agent can update this file itself later.
 PRICING = {
     # Anthropic
-    "anthropic/claude-opus-4-20250514":    (15.0, 75.0),
-    "anthropic/claude-sonnet-4-20250514":  (3.0, 15.0),
+    "anthropic/claude-opus-4-6":    (15.0, 75.0),
+    "anthropic/claude-sonnet-4-6":  (3.0, 15.0),
     "anthropic/claude-haiku-4-5-20251001": (0.80, 4.0),
 
     # Google Gemini — 2.5 series (stable)
@@ -105,10 +105,10 @@ class AnthropicBackend:
             api_key=os.environ.get("ANTHROPIC_API_KEY")
         )
 
-    def complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
+    def complete(self, model: str, system: str, message: str, max_tokens: int = None) -> LLMResponse:
         response = self.client.messages.create(
             model=model,
-            max_tokens=max_tokens,
+            max_tokens=max_tokens or 32768,
             system=system,
             messages=[{"role": "user", "content": message}],
         )
@@ -130,13 +130,12 @@ class GeminiBackend:
         api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         self.client = genai.Client(api_key=api_key)
 
-    def complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
+    def complete(self, model: str, system: str, message: str, max_tokens: int = None) -> LLMResponse:
         from google.genai import types
 
-        config_kwargs = dict(
-            system_instruction=system,
-            max_output_tokens=max_tokens,
-        )
+        config_kwargs = dict(system_instruction=system)
+        if max_tokens is not None:
+            config_kwargs["max_output_tokens"] = max_tokens
         # Flash supports disabling thinking (saves tokens); Pro requires it
         if "flash" in model.lower():
             config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
@@ -208,15 +207,17 @@ class OpenAICompatBackend:
 
         self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
-    def complete(self, model: str, system: str, message: str, max_tokens: int) -> LLMResponse:
-        response = self.client.chat.completions.create(
+    def complete(self, model: str, system: str, message: str, max_tokens: int = None) -> LLMResponse:
+        kwargs = dict(
             model=model,
-            max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": message},
             ],
         )
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        response = self.client.chat.completions.create(**kwargs)
 
         choice = response.choices[0]
         usage = response.usage
@@ -270,7 +271,7 @@ class LLMClient:
         model: str,
         system: str,
         message: str,
-        max_tokens: int = 2000,
+        max_tokens: int = None,
     ) -> LLMResponse:
         """Send a completion request to any supported provider.
 
@@ -286,13 +287,13 @@ class LLMClient:
         if "/" not in model:
             raise ValueError(
                 f"Model must be in 'provider/model' format, got: '{model}'. "
-                f"Example: 'anthropic/claude-sonnet-4-20250514'"
+                f"Example: 'anthropic/claude-sonnet-4-6'"
             )
 
         provider, model_name = model.split("/", 1)
         backend = self._get_backend(provider)
 
-        log.info(f"  🤖 {provider}/{model_name} (max {max_tokens} tokens)")
+        log.info(f"  🤖 {provider}/{model_name}" + (f" (max {max_tokens} tokens)" if max_tokens else ""))
         response = backend.complete(model_name, system, message, max_tokens)
 
         log.info(
@@ -314,30 +315,30 @@ ROUTING_PROFILES = {
         "review_confirm": "gemini/gemini-3.1-pro-preview",
         "title_gen": "gemini/gemini-3.1-flash-lite-preview",
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
-        "implement": "gemini/gemini-3-flash-preview",
-        "plan": "gemini/gemini-3-flash-preview",
+        "implement": "gemini/gemini-3.1-flash-preview",
+        "plan": "gemini/gemini-3.1-flash-preview",
     },
     "balanced": {
         # Balance cost and quality
-        "refine": "anthropic/claude-sonnet-4-20250514",
-        "brainstorm": "anthropic/claude-sonnet-4-20250514",
-        "review": "anthropic/claude-sonnet-4-20250514",
-        "review_confirm": "anthropic/claude-opus-4-20250514",
+        "refine": "anthropic/claude-sonnet-4-6",
+        "brainstorm": "anthropic/claude-sonnet-4-6",
+        "review": "anthropic/claude-sonnet-4-6",
+        "review_confirm": "anthropic/claude-opus-4-6",
         "title_gen": "gemini/gemini-3.1-flash-lite-preview",
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
-        "implement": "anthropic/claude-sonnet-4-20250514",
-        "plan": "anthropic/claude-opus-4-20250514",
+        "implement": "anthropic/claude-sonnet-4-6",
+        "plan": "anthropic/claude-opus-4-6",
     },
     "quality": {
         # Maximize quality — use best models everywhere
-        "refine": "anthropic/claude-sonnet-4-20250514",
-        "brainstorm": "anthropic/claude-opus-4-20250514",
-        "review": "anthropic/claude-opus-4-20250514",
-        "review_confirm": "anthropic/claude-opus-4-20250514",
-        "title_gen": "anthropic/claude-sonnet-4-20250514",
-        "commit_msg": "anthropic/claude-sonnet-4-20250514",
-        "implement": "anthropic/claude-opus-4-20250514",
-        "plan": "anthropic/claude-opus-4-20250514",
+        "refine": "anthropic/claude-sonnet-4-6",
+        "brainstorm": "anthropic/claude-opus-4-6",
+        "review": "anthropic/claude-opus-4-6",
+        "review_confirm": "anthropic/claude-opus-4-6",
+        "title_gen": "anthropic/claude-sonnet-4-6",
+        "commit_msg": "anthropic/claude-sonnet-4-6",
+        "implement": "anthropic/claude-opus-4-6",
+        "plan": "anthropic/claude-opus-4-6",
     },
 }
 
@@ -350,7 +351,7 @@ class ModelRouter:
         model = router.get("refine")   # → "gemini/gemini-2.5-flash"
 
         # Override specific routes:
-        router = ModelRouter("cheap", overrides={"brainstorm": "anthropic/claude-opus-4-20250514"})
+        router = ModelRouter("cheap", overrides={"brainstorm": "anthropic/claude-opus-4-6"})
     """
 
     def __init__(self, profile: str = "balanced", overrides: dict = None):
@@ -370,7 +371,7 @@ class ModelRouter:
         """Get the model string for a task type."""
         if task not in self.routes:
             log.warning(f"  No route for task '{task}', falling back to refine model")
-            return self.routes.get("refine", "anthropic/claude-sonnet-4-20250514")
+            return self.routes.get("refine", "anthropic/claude-sonnet-4-6")
         return self.routes[task]
 
     def summary(self) -> str:

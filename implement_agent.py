@@ -228,7 +228,7 @@ class ImplementAgent:
 
         log.info(f"\n{self.router.summary()}\n")
 
-    def _complete(self, task: str, system: str, message: str, max_tokens: int = 4000):
+    def _complete(self, task: str, system: str, message: str, max_tokens: int = None):
         """Route to right model, call LLM, track cost."""
         model = self.router.get(task)
         response = self.llm.complete(model, system, message, max_tokens)
@@ -274,8 +274,12 @@ class ImplementAgent:
 
     def _build_implement_message(self, issue, plan: dict, file_spec: dict, context: dict) -> str:
         context_str = ""
+        is_modify = file_spec["action"] == "modify"
         for path, content in context.items():
-            context_str += f"\n### {path}\n```\n{content[:3000]}\n```\n"
+            # Full content for the file being modified; cap reference files at 20k
+            limit = None if (is_modify and path == file_spec["path"]) else 20000
+            body = content if limit is None else content[:limit]
+            context_str += f"\n### {path}\n```\n{body}\n```\n"
         return (
             f"## Issue #{issue.number}: {issue.title}\n\n"
             f"{issue.body or ''}\n\n"
@@ -323,7 +327,6 @@ class ImplementAgent:
                 task="plan",
                 system=PLAN_SYSTEM,
                 message=self._build_plan_message(issue, file_tree),
-                max_tokens=4000,
             )
             if not self.cost.check_ceiling():
                 return False
@@ -365,7 +368,6 @@ class ImplementAgent:
                     task="implement",
                     system=IMPLEMENT_SYSTEM,
                     message=self._build_implement_message(issue, plan, file_spec, context),
-                    max_tokens=65536,
                 )
                 log.info(f"  Generated {len(impl_response.text or '')} chars for {file_spec['path']}")
                 if not self.cost.check_ceiling():

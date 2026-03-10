@@ -32,7 +32,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FOREMAN_REPO: ${{ secrets.FOREMAN_REPO }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          BRAIN_MODEL: claude-sonnet-4-20250514
+          BRAIN_MODEL: claude-sonnet-4-6
           BRAIN_MAX_TOKENS: "4096"
           BRAIN_COST_CEILING: "1.0"
           ALLOWED_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_ID }}
