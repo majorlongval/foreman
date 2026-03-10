@@ -15,12 +15,12 @@ Usage:
 import os
 import re
 import sys
-import json
+
 import logging
 import argparse
 from datetime import datetime, timezone
 
-from github import Github, GithubException
+from github import Github
 from llm_client import LLMClient, ModelRouter
 from cost_monitor import CostTracker
 from telegram_notifier import notify as tg
@@ -110,14 +110,17 @@ class FixAgent:
                 count += 1
         return count
 
+    # File extensions we expect in review comments
+    _FILE_EXTENSIONS = ('.py', '.yml', '.yaml', '.json', '.toml', '.md', '.txt', '.cfg', '.ini', '.sh')
+
     def _parse_affected_files(self, review_body: str) -> list[str]:
         """Extract file paths mentioned in review issues."""
         files = set()
         # Match patterns like `filename.py:123` or `filename.py:10-20`
         for match in re.finditer(r'`([^`]+\.\w+)(?::\d+(?:-\d+)?)?`', review_body):
             filepath = match.group(1)
-            # Basic sanity check — looks like a file path
-            if '.' in filepath and not filepath.startswith('http'):
+            # Require a known file extension to avoid false positives like `response.text`
+            if any(filepath.endswith(ext) for ext in self._FILE_EXTENSIONS):
                 files.add(filepath)
         return list(files)
 
@@ -220,6 +223,11 @@ class FixAgent:
                     log.info(f"  No changes needed for {filepath}")
                     continue
 
+                # File size guard (same as implement_agent)
+                if len(fixed_content) > 900_000:
+                    log.error(f"  Fixed content for {filepath} too large ({len(fixed_content)} bytes) — skipping")
+                    continue
+
                 # Push fix
                 if not self.dry_run:
                     self.repo.update_file(
@@ -242,16 +250,12 @@ class FixAgent:
                 )
                 if not self.dry_run:
                     pr.create_issue_comment(summary + FIX_SIGNATURE)
-                    # Remove fixing label — review agent will pick it up on synchronize
-                    try:
-                        pr.remove_from_labels(self.repo.get_label(LABEL_FIXING))
-                    except Exception:
-                        pass
                     # Remove reviewed label so review agent runs again
                     try:
                         pr.remove_from_labels(self.repo.get_label(LABEL_REVIEWED))
                     except Exception:
                         pass
+                    tg(f"🔧 Fix agent pushed fixes to PR #{pr.number}: {', '.join(fixes_applied)}\n{pr.html_url}")
                 log.info(f"  Fixed {len(fixes_applied)} files")
                 self.stats["fixed"] += 1
             else:
@@ -263,6 +267,7 @@ class FixAgent:
         except Exception as e:
             log.error(f"  Fix failed for PR #{pr.number}: {e}", exc_info=True)
             self.stats["failed"] += 1
+            tg(f"❌ Fix agent failed on PR #{pr.number}: {e}\n{pr.html_url}")
             return False
 
         finally:
