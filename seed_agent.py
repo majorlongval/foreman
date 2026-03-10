@@ -63,7 +63,8 @@ log = logging.getLogger("foreman")
 
 from cost_monitor import CostTracker, CloudCostMonitor, create_cost_system
 from llm_client import LLMClient, ModelRouter
-from telegram_notifier import notify as tg
+from telegram_notifier import notify as tg, start_telegram_bot_polling, is_polling_alive
+from agent_state import agent_state_manager as state, AgentState
 
 
 # ─── Vision Loader ───────────────────────────────────────────
@@ -418,7 +419,7 @@ class ForemanAgent:
         return self.stats
 
     def run_loop(self):
-        """Run the agent in a continuous loop."""
+        """Run the agent in a continuous loop with Telegram pause/resume support."""
         log.info("🚀 FOREMAN agent starting")
         log.info(f"   Repo: {REPO_NAME}")
         log.info(f"   Poll interval: {POLL_INTERVAL_SEC}s")
@@ -427,8 +428,19 @@ class ForemanAgent:
         log.info(f"   Models: {self.router.summary()}")
         log.info(f"   Dry run: {self.dry_run}")
 
+        start_telegram_bot_polling()
+        state.set_state(AgentState.RUNNING)
+
         try:
             while True:
+                # Pause loop — wait until resumed or polling thread dies
+                while state.get_state() == AgentState.PAUSED:
+                    if not is_polling_alive():
+                        log.warning("Telegram polling thread died while paused. Auto-resuming.")
+                        state.set_state(AgentState.RUNNING)
+                        break
+                    time.sleep(15)
+
                 self.run_once()
                 log.info(f"💤 Sleeping {POLL_INTERVAL_SEC}s...")
                 time.sleep(POLL_INTERVAL_SEC)
@@ -437,6 +449,8 @@ class ForemanAgent:
             log.info(f"📊 Final stats: {self.stats}")
             log.info(f"💰 {self.cost.summary()}")
             self.cost.save_session()
+        finally:
+            state.set_state(AgentState.IDLE)
 
 
 # ─── CLI ─────────────────────────────────────────────────────
