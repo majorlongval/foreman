@@ -50,6 +50,35 @@ LABEL_READY = "ready"  # refined and ready for implementation
 LABEL_IMPLEMENTING = "foreman-implementing"
 FORBIDDEN_LABELS = {LABEL_AUTO_REFINED, LABEL_REFINED_OUT, LABEL_DRAFT, LABEL_READY, LABEL_IMPLEMENTING}
 
+# ─── Prompts ──────────────────────────────────────────────────
+
+REFINE_SYSTEM = """You are FOREMAN, an expert systems architect.
+Your task is to take a rough GitHub issue and "refine" it into a professional, implementation-ready specification.
+
+Output ONLY valid JSON:
+{
+  "title": "Clear, concise title (can be improved from original)",
+  "summary": "Brief explanation of the 'why' and the 'what'",
+  "acceptance_criteria": ["list of testable requirements"],
+  "subtasks": ["atomic engineering steps"],
+  "t_shirt_size": "XS|S|M|L|XL",
+  "priority": "Low|Medium|High|Critical"
+}"""
+
+BRAINSTORM_SYSTEM = """You are FOREMAN. Based on the product VISION.md and current open issues, 
+propose NEW technical tasks that move the project forward. 
+Focus on modularity, testability, and building infrastructure.
+
+Output ONLY valid JSON:
+{
+  "ideas": [
+    {
+      "title": "Title of the task",
+      "body": "Detailed description in Markdown"
+    }
+  ]
+}"""
+
 # ─── Logging ──────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -63,7 +92,7 @@ log = logging.getLogger("foreman")
 
 from cost_monitor import CostTracker, CloudCostMonitor, create_cost_system
 from llm_client import LLMClient, ModelRouter
-from telegram_notifier import notify as tg, start_telegram_bot_polling
+from telegram_notifier import notify as tg, start_telegram_bot_polling, is_polling_alive
 from agent_state import agent_state_manager as state, AgentState
 
 
@@ -108,11 +137,9 @@ class GitHubClient:
 
     def find_similar_issue(self, title: str):
         """Finds an open issue with a similar title."""
-        # This is a very basic search, could be improved with embeddings etc.
         query = f'repo:"{self.repo.full_name}" is:issue is:open "{title}"'
         results = self.gh.search_issues(query)
         if results.totalCount > 0:
-            # Check for a very close match to avoid false positives
             for issue in results:
                 if issue.title.lower().strip() == title.lower().strip():
                     return issue
@@ -121,22 +148,28 @@ class GitHubClient:
     def create_issue(self, title, body, labels):
         if self.dry_run:
             log.info(f"[DRY RUN] Would create issue '{title}' with labels {labels}")
-            log.info(f"Body:\n---\n{body}\n---")
-            return None  # Can't return a fake issue object easily, so caller must handle None
+            return None
 
         log.info(f"Creating issue '{title}' with labels {labels}")
         return self.repo.create_issue(title=title, body=body, labels=labels)
 
+    def create_refined_issue(self, data, original_num):
+        """Standardized refined issue creation."""
+        body = f"## Summary\n{data['summary']}\n\n"
+        body += "## Acceptance Criteria\n" + "\n".join([f"- [ ] {i}" for i in data["acceptance_criteria"]]) + "\n\n"
+        body += "## Subtasks\n" + "\n".join([f"- [ ] {i}" for i in data["subtasks"]]) + "\n\n"
+        body += f"**Size:** {data.get('t_shirt_size', 'N/A')} | **Priority:** {data.get('priority', 'Medium')}\n"
+        body += f"\n---\n_Auto-refined from #{original_num}_"
+        
+        return self.create_issue(data["title"], body, [LABEL_AUTO_REFINED, LABEL_READY])
+
     def update_issue(self, issue_number, title=None, body=None):
         if self.dry_run:
             log.info(f"[DRY RUN] Would update issue #{issue_number}")
-            if title: log.info(f"  New title: {title}")
-            if body: log.info(f"  New body:\n---\n{body}\n---")
             return
 
         issue = self.get_issue_by_number(issue_number)
         if issue:
-            log.info(f"Updating issue #{issue_number}: '{title}'")
             args = {}
             if title: args["title"] = title
             if body: args["body"] = body
@@ -144,12 +177,11 @@ class GitHubClient:
 
     def add_comment_to_issue(self, issue_number, comment):
         if self.dry_run:
-            log.info(f"[DRY RUN] Would add comment to issue #{issue_number}:\n---\n{comment}\n---")
+            log.info(f"[DRY RUN] Would add comment to issue #{issue_number}")
             return
 
         issue = self.get_issue_by_number(issue_number)
         if issue:
-            log.info(f"Adding comment to issue #{issue_number}")
             issue.create_comment(comment)
 
     def close_issue(self, issue_number):
@@ -159,7 +191,6 @@ class GitHubClient:
 
         issue = self.get_issue_by_number(issue_number)
         if issue:
-            log.info(f"Closing issue #{issue_number}")
             issue.edit(state="closed")
 
     def add_labels_to_issue(self, issue_number, labels):
@@ -169,7 +200,6 @@ class GitHubClient:
 
         issue = self.get_issue_by_number(issue_number)
         if issue:
-            log.info(f"Adding labels {labels} to issue #{issue_number}")
             issue.add_to_labels(*labels)
 
     def remove_label_from_issue(self, issue_number, label):
@@ -179,12 +209,8 @@ class GitHubClient:
 
         issue = self.get_issue_by_number(issue_number)
         if issue:
-            # Check if label exists before trying to remove
             if any(l.name == label for l in issue.get_labels()):
-                log.info(f"Removing label '{label}' from issue #{issue_number}")
                 issue.remove_from_labels(label)
-            else:
-                log.warning(f"Label '{label}' not found on issue #{issue_number}, cannot remove.")
 
 
 # ─── Agent ───────────────────────────────────────────────────
@@ -193,7 +219,7 @@ class ForemanAgent:
     def __init__(self, github_token, repo_name, dry_run=False):
         self.gh = GitHubClient(github_token, repo_name, dry_run=dry_run)
         self.cost = create_cost_system(CostTracker(), CloudCostMonitor())
-        self.llm = LLMClient(cost_tracker=self.cost.llm, routing_profile=ROUTING_PROFILE)
+        self.llm = ModelRouter(cost_tracker=self.cost.llm, profile=ROUTING_PROFILE)
         self.vision = load_vision()
         self.dry_run = dry_run
         self._ensure_labels()
@@ -218,36 +244,23 @@ class ForemanAgent:
         current_labels = {l.name for l in issue.labels}
         if not FORBIDDEN_LABELS.isdisjoint(current_labels):
             return True
-        if f"_Auto-refined from #{issue.number}_" in (issue.body or ""):
-            return True
         return False
 
     def refine_issue(self, issue):
         if self._should_skip(issue):
-            log.warning(f"Skipping issue #{issue.number}")
             return
 
         log.info(f"Processing issue #{issue.number}: '{issue.title}'")
-        issue_text = format_issue_for_llm(issue)
-        system_prompt = Path("prompts/refine_issue.md").read_text()
+        issue_text = f"Issue Title: {issue.title}\nIssue Number: {issue.number}\nIssue Body:\n{issue.body}"
 
         try:
-            response_text = self.llm.chat(system_prompt, issue_text, json_mode=True)
+            response_text = self.llm.chat(REFINE_SYSTEM, issue_text, json_mode=True, task_id=f"refine-#{issue.number}")
+            refined_data = json.loads(response_text)
         except Exception as e:
-            log.error(f"LLM API call failed for issue #{issue.number}: {e}")
+            log.error(f"Refinement failed for #{issue.number}: {e}")
             return
 
-        refined_data = parse_llm_output(response_text)
-        if not refined_data:
-            self.gh.add_comment_to_issue(issue.number, "⚠️ **Auto-refinement failed.**")
-            return
-
-        refined_data["original_issue_number"] = issue.number
-        new_issue = self.gh.create_issue(
-            refined_data["title"], 
-            format_refined_issue_body(refined_data), 
-            [LABEL_AUTO_REFINED, LABEL_READY]
-        )
+        new_issue = self.gh.create_refined_issue(refined_data, issue.number)
 
         if new_issue or self.dry_run:
             new_num = new_issue.number if new_issue else "DRY_RUN"
@@ -263,11 +276,10 @@ class ForemanAgent:
         drafts = list(self.gh.get_issues_by_label(LABEL_DRAFT))
         ready = list(self.gh.get_issues_by_label(LABEL_READY))
         
-        system_prompt = Path("prompts/brainstorm_issues.md").read_text()
         user_prompt = f"Vision:\n{self.vision}\n\nExisting:\n" + "\n".join([f"#{i.number}: {i.title}" for i in drafts + ready])
 
         try:
-            response_text = self.llm.chat(system_prompt, user_prompt, json_mode=True)
+            response_text = self.llm.chat(BRAINSTORM_SYSTEM, user_prompt, json_mode=True, task_id="brainstorm")
             ideas = json.loads(response_text).get("ideas", [])
         except Exception as e:
             log.error(f"Brainstorming failed: {e}")
@@ -294,30 +306,6 @@ class ForemanAgent:
         self.cost.llm.save_session()
         return True
 
-# ─── Business Logic Helpers ───────────────────────────────────
-
-def format_issue_for_llm(issue) -> str:
-    return f"Issue Title: {issue.title}\nIssue Number: {issue.number}\nIssue Body:\n{issue.body}"
-
-def parse_llm_output(output: str) -> dict:
-    try:
-        if output.startswith("```json"): output = output[7:]
-        if output.endswith("```"): output = output[:-3]
-        data = json.loads(output.strip())
-        if not all(k in data for k in ["title", "summary", "acceptance_criteria", "subtasks"]): return {}
-        return data
-    except: return {}
-
-def format_refined_issue_body(data: dict) -> str:
-    body = f"## Summary\n{data['summary']}\n\n"
-    if data.get("acceptance_criteria"):
-        body += "## Acceptance Criteria\n" + "\n".join([f"- [ ] {i}" for i in data["acceptance_criteria"]]) + "\n\n"
-    if data.get("subtasks"):
-        body += "## Subtasks\n" + "\n".join([f"- [ ] {i}" for i in data["subtasks"]]) + "\n\n"
-    if data.get("original_issue_number"):
-        body += f"---\n_Auto-refined from #{data['original_issue_number']}_"
-    return body.strip()
-
 
 # ─── Main ─────────────────────────────────────────────────────
 
@@ -337,6 +325,10 @@ def main():
     try:
         while True:
             while state.get_state() == AgentState.PAUSED:
+                if not is_polling_alive():
+                    log.warning("Telegram polling thread died while paused. Auto-resuming for safety.")
+                    state.set_state(AgentState.RUNNING)
+                    break
                 time.sleep(15)
 
             mode = "BRAINSTORM" if args.brainstorm_only else "AUTO"
