@@ -22,6 +22,7 @@ from github import Github
 
 from brain_tools import TOOL_SCHEMAS, execute_tool, get_project_status
 from cost_monitor import CostTracker
+from llm_client import get_embedding, cosine_similarity, is_duplicate_issue
 
 # ─── Configuration ────────────────────────────────────────────
 
@@ -66,60 +67,6 @@ def get_github_repo(repo_name: str):
     if repo_name not in _repo_cache:
         _repo_cache[repo_name] = _get_github().get_repo(repo_name)
     return _repo_cache[repo_name]
-
-
-# ─── Semantic Duplicate Check ────────────────────────────────
-
-def _get_embedding(text: str) -> list[float]:
-    """Generate embedding for text using OpenAI API (standard choice for embeddings)."""
-    # Note: Anthropic doesn't have an embedding API. We'll use OpenAI if available, 
-    # or a mock for similarity if not configured, though the plan implies using the 'configured LLM API'.
-    # For FOREMAN, we assume an OpenAI client is used for embeddings as is common.
-    import openai
-    client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    response = client.embeddings.create(
-        input=[text.replace("\n", " ")],
-        model="text-embedding-3-small"
-    )
-    return response.data[0].embedding
-
-
-def _cosine_similarity(v1: list[float], v2: list[float]) -> float:
-    dot_product = sum(a * b for a, b in zip(v1, v2))
-    magnitude1 = math.sqrt(sum(a * a for a in v1))
-    magnitude2 = math.sqrt(sum(b * b for b in v2))
-    if not magnitude1 or not magnitude2:
-        return 0.0
-    return dot_product / (magnitude1 * magnitude2)
-
-
-def is_duplicate_issue(repo, title: str, body: str) -> tuple[bool, str]:
-    """Check if proposed issue is semantically similar to any open issue."""
-    try:
-        if not os.environ.get("OPENAI_API_KEY"):
-            log.warning("OPENAI_API_KEY not set, skipping semantic duplicate check")
-            return False, ""
-
-        new_content = f"{title}\n{body}"
-        new_emb = _get_embedding(new_content)
-
-        open_issues = repo.get_issues(state="open")
-        for issue in open_issues:
-            if issue.pull_request:
-                continue
-            
-            existing_content = f"{issue.title}\n{issue.body or ''}"
-            existing_emb = _get_embedding(existing_content)
-            
-            similarity = _cosine_similarity(new_emb, existing_emb)
-            if similarity > SIMILARITY_THRESHOLD:
-                log.info(f"Duplicate detected: '{title}' is {similarity:.2f} similar to #{issue.number}")
-                return True, f"Issue #{issue.number}"
-        
-        return False, ""
-    except Exception as e:
-        log.error(f"Error in is_duplicate_issue: {e}")
-        return False, ""
 
 
 # ─── System Prompt ────────────────────────────────────────────
@@ -244,7 +191,7 @@ def process_message(user_message: str, chat_data: dict) -> str:
                 if block.name == "create_issue":
                     title = block.input.get("title", "")
                     body = block.input.get("body", "")
-                    duplicate, similar_id = is_duplicate_issue(repo, title, body)
+                    duplicate, similar_id = is_duplicate_issue(repo, title, body, SIMILARITY_THRESHOLD)
                     if duplicate:
                         log.info(f"Aborting creation of duplicate issue: '{title}' (Similar to {similar_id})")
                         result = f"Aborted: This issue appears too similar to existing {similar_id}."
