@@ -128,7 +128,11 @@ class AnthropicBackend:
         )
 
     def embed(self, model: str, text: str) -> List[float]:
-        raise NotImplementedError("Anthropic does not provide an embeddings API yet.")
+        # Anthropic does not provide an embeddings API.
+        # Fallback to OpenAI's small embedding model if an Anthropic config requests embedding.
+        log.warning(f"  Anthropic does not support embedding. Falling back to openai/text-embedding-3-small.")
+        fallback = OpenAICompatBackend("openai")
+        return fallback.embed("text-embedding-3-small", text)
 
 
 class GeminiBackend:
