@@ -191,11 +191,11 @@ def process_message(user_message: str, chat_data: dict) -> str:
                 if block.name == "create_issue":
                     title = block.input.get("title", "")
                     body = block.input.get("body", "")
-                    # Fix: pass text1, text2, model, threshold to is_duplicate_issue
+                    # Fix: pass repo, title, body, threshold to is_duplicate_issue
                     duplicate, similar_id = is_duplicate_issue(
-                        f"{title}\n\n{body}",
-                        repo_name,
-                        BRAIN_MODEL,
+                        repo,
+                        title,
+                        body,
                         SIMILARITY_THRESHOLD
                     )
                     if duplicate:
