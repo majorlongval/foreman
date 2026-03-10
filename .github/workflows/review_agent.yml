@@ -36,3 +36,4 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ROUTING_PROFILE: cheap
           COST_CEILING_USD: "1.0"
+          MAX_FIX_CYCLES: "5"
