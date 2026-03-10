@@ -101,6 +101,65 @@ def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> floa
     return in_cost + out_cost
 
 
+# ─── Routing ─────────────────────────────────────────────────
+
+ROUTING_PROFILES = {
+    "cheap": {
+        "refine":         "gemini/gemini-3-flash-preview",
+        "brainstorm":     "gemini/gemini-3-flash-preview",
+        "review":         "gemini/gemini-3-flash-preview",
+        "review_confirm": "gemini/gemini-3.1-pro-preview",
+        "title_gen":      "gemini/gemini-3.1-flash-lite-preview",
+        "commit_msg":     "gemini/gemini-3.1-flash-lite-preview",
+        "implement":      "gemini/gemini-3-flash-preview",
+        "plan":           "gemini/gemini-3-flash-preview",
+    },
+    "balanced": {
+        "refine":         "anthropic/claude-sonnet-4-20250514",
+        "brainstorm":     "anthropic/claude-sonnet-4-20250514",
+        "review":         "anthropic/claude-sonnet-4-20250514",
+        "review_confirm": "anthropic/claude-opus-4-20250514",
+        "title_gen":      "gemini/gemini-3.1-flash-lite-preview",
+        "commit_msg":     "gemini/gemini-3.1-flash-lite-preview",
+        "implement":      "anthropic/claude-sonnet-4-20250514",
+        "plan":           "anthropic/claude-opus-4-20250514",
+    },
+    "quality": {
+        "refine":         "anthropic/claude-sonnet-4-20250514",
+        "brainstorm":     "anthropic/claude-opus-4-20250514",
+        "review":         "anthropic/claude-opus-4-20250514",
+        "review_confirm": "anthropic/claude-opus-4-20250514",
+        "title_gen":      "anthropic/claude-sonnet-4-20250514",
+        "commit_msg":     "anthropic/claude-sonnet-4-20250514",
+        "implement":      "anthropic/claude-opus-4-20250514",
+        "plan":           "anthropic/claude-opus-4-20250514",
+    },
+}
+
+
+class ModelRouter:
+    """Routes tasks to the appropriate model based on a named routing profile."""
+
+    def __init__(self, profile: str = "balanced"):
+        if profile not in ROUTING_PROFILES:
+            raise ValueError(f"Unknown routing profile '{profile}'. Choose from: {list(ROUTING_PROFILES)}")
+        self.profile = profile
+        self._routes = ROUTING_PROFILES[profile]
+
+    def get(self, task: str) -> str:
+        """Return the model string for the given task."""
+        if task not in self._routes:
+            raise ValueError(f"Unknown task '{task}' for profile '{self.profile}'. Known tasks: {list(self._routes)}")
+        return self._routes[task]
+
+    def summary(self) -> str:
+        """Return a human-readable summary of the active routing profile."""
+        lines = [f"ModelRouter profile={self.profile!r}"]
+        for task, model in self._routes.items():
+            lines.append(f"  {task:<16} → {model}")
+        return "\n".join(lines)
+
+
 # ─── Client ──────────────────────────────────────────────────
 
 class LLMClient:
