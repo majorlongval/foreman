@@ -12,7 +12,7 @@ jobs:
     permissions:
       issues: write
       pull-requests: write
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -32,5 +32,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FOREMAN_REPO: ${{ secrets.FOREMAN_REPO }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ROUTING_PROFILE: cheap
           COST_CEILING_USD: "1.0"

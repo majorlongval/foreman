@@ -307,20 +307,22 @@ class LLMClient:
 # Predefined routing profiles — maps task types to models
 ROUTING_PROFILES = {
     "cheap": {
-        # Pro for decisions, Flash for cheap mechanical tasks
-        "refine": "gemini/gemini-2.5-pro",
-        "brainstorm": "gemini/gemini-2.5-pro",
-        "review": "gemini/gemini-2.5-pro",
-        "title_gen": "gemini/gemini-2.5-flash",
-        "commit_msg": "gemini/gemini-2.5-flash",
-        "implement": "gemini/gemini-2.5-pro",
-        "plan": "gemini/gemini-2.5-pro",
+        # 3.1 Flash for decisions, Flash Lite for cheap mechanical tasks
+        "refine": "gemini/gemini-3-flash-preview",
+        "brainstorm": "gemini/gemini-3-flash-preview",
+        "review": "gemini/gemini-3-flash-preview",
+        "review_confirm": "gemini/gemini-3.1-pro-preview",
+        "title_gen": "gemini/gemini-3.1-flash-lite-preview",
+        "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
+        "implement": "gemini/gemini-3-flash-preview",
+        "plan": "gemini/gemini-3-flash-preview",
     },
     "balanced": {
         # Balance cost and quality
         "refine": "anthropic/claude-sonnet-4-20250514",
         "brainstorm": "anthropic/claude-sonnet-4-20250514",
         "review": "anthropic/claude-sonnet-4-20250514",
+        "review_confirm": "anthropic/claude-opus-4-20250514",
         "title_gen": "gemini/gemini-3.1-flash-lite-preview",
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "anthropic/claude-sonnet-4-20250514",
@@ -331,6 +333,7 @@ ROUTING_PROFILES = {
         "refine": "anthropic/claude-sonnet-4-20250514",
         "brainstorm": "anthropic/claude-opus-4-20250514",
         "review": "anthropic/claude-opus-4-20250514",
+        "review_confirm": "anthropic/claude-opus-4-20250514",
         "title_gen": "anthropic/claude-sonnet-4-20250514",
         "commit_msg": "anthropic/claude-sonnet-4-20250514",
         "implement": "anthropic/claude-opus-4-20250514",
