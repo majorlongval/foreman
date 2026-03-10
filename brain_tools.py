@@ -8,7 +8,7 @@ via run_in_executor.
 
 import logging
 import os
-import math
+from llm_client import LLMClient, is_duplicate_issue
 
 log = logging.getLogger("foreman.brain.tools")
 
@@ -347,66 +347,6 @@ def _merge_pr(repo, number):
     except Exception as e:
         log.error(f"merge_pr failed: {e}")
         return f"Error merging PR #{number}: {e}"
-
-
-def _get_embeddings(text: str) -> list[float]:
-    """Generate embeddings for text using OpenAI-compatible API."""
-    try:
-        import openai
-        # Use existing env logic to find a provider. Default to OpenAI for embeddings.
-        api_key = os.environ.get("OPENAI_API_KEY")
-        base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        client = openai.OpenAI(api_key=api_key, base_url=base_url)
-        
-        response = client.embeddings.create(
-            input=[text],
-            model="text-embedding-3-small"
-        )
-        return response.data[0].embedding
-    except Exception as e:
-        log.error(f"Embedding generation failed: {e}")
-        return []
-
-
-def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
-    """Calculate cosine similarity between two vectors."""
-    if not vec1 or not vec2:
-        return 0.0
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    norm_a = math.sqrt(sum(a * a for a in vec1))
-    norm_b = math.sqrt(sum(b * b for b in vec2))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot_product / (norm_a * norm_b)
-
-
-def is_duplicate_issue(repo, title, body) -> tuple[bool, str]:
-    """Check if an issue is semantically similar to an existing open issue."""
-    try:
-        content = f"{title}\n\n{body}"
-        new_embedding = _get_embeddings(content)
-        if not new_embedding:
-            return False, ""
-
-        issues = list(repo.get_issues(state="open"))
-        # Exclude PRs
-        real_issues = [i for i in issues if i.pull_request is None]
-
-        for issue in real_issues:
-            issue_content = f"{issue.title}\n\n{issue.body or ''}"
-            issue_embedding = _get_embeddings(issue_content)
-            if not issue_embedding:
-                continue
-            
-            similarity = _cosine_similarity(new_embedding, issue_embedding)
-            if similarity > SIMILARITY_THRESHOLD:
-                log.info(f"Duplicate detected: '{title}' is similar to #{issue.number} (score: {similarity:.4f})")
-                return True, str(issue.number)
-        
-        return False, ""
-    except Exception as e:
-        log.error(f"is_duplicate_issue check failed: {e}")
-        return False, ""
 
 
 def _create_issue(repo, title, body, labels=None):
