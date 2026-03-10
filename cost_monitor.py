@@ -23,6 +23,9 @@ log = logging.getLogger("foreman.costs")
 
 # Pricing per 1M tokens (update as needed)
 MODEL_PRICING = {
+    "claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
+    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
+    "claude-opus-4-6":           {"input": 15.0, "output": 75.0},
     "anthropic/claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
     "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
     "anthropic/claude-opus-4-6":           {"input": 15.0, "output": 75.0},
