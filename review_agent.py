@@ -68,7 +68,7 @@ def get_coding_standards() -> str:
     try:
         standards_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "STANDARDS.md")
         if os.path.exists(standards_path):
-            with open(standards_path, "r") as f:
+            with open(standards_path, "r", encoding="utf-8") as f:
                 content = f.read()
             log.info("Successfully loaded STANDARDS.md")
             return content
