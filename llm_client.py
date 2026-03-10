@@ -101,62 +101,82 @@ def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> floa
     return in_cost + out_cost
 
 
-# ─── Routing ─────────────────────────────────────────────────
+# ─── Model Router ─────────────────────────────────────────────
 
+# Predefined routing profiles — maps task types to models
 ROUTING_PROFILES = {
     "cheap": {
-        "refine":         "gemini/gemini-3-flash-preview",
-        "brainstorm":     "gemini/gemini-3-flash-preview",
-        "review":         "gemini/gemini-3-flash-preview",
+        # 3.1 Flash for decisions, Flash Lite for cheap mechanical tasks
+        "refine": "gemini/gemini-3-flash-preview",
+        "brainstorm": "gemini/gemini-3-flash-preview",
+        "review": "gemini/gemini-3-flash-preview",
         "review_confirm": "gemini/gemini-3.1-pro-preview",
-        "title_gen":      "gemini/gemini-3.1-flash-lite-preview",
-        "commit_msg":     "gemini/gemini-3.1-flash-lite-preview",
-        "implement":      "gemini/gemini-3-flash-preview",
-        "plan":           "gemini/gemini-3-flash-preview",
+        "title_gen": "gemini/gemini-3.1-flash-lite-preview",
+        "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
+        "implement": "gemini/gemini-3-flash-preview",
+        "plan": "gemini/gemini-3-flash-preview",
     },
     "balanced": {
-        "refine":         "anthropic/claude-sonnet-4-20250514",
-        "brainstorm":     "anthropic/claude-sonnet-4-20250514",
-        "review":         "anthropic/claude-sonnet-4-20250514",
+        # Balance cost and quality
+        "refine": "anthropic/claude-sonnet-4-20250514",
+        "brainstorm": "anthropic/claude-sonnet-4-20250514",
+        "review": "anthropic/claude-sonnet-4-20250514",
         "review_confirm": "anthropic/claude-opus-4-20250514",
-        "title_gen":      "gemini/gemini-3.1-flash-lite-preview",
-        "commit_msg":     "gemini/gemini-3.1-flash-lite-preview",
-        "implement":      "anthropic/claude-sonnet-4-20250514",
-        "plan":           "anthropic/claude-opus-4-20250514",
+        "title_gen": "gemini/gemini-3.1-flash-lite-preview",
+        "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
+        "implement": "anthropic/claude-sonnet-4-20250514",
+        "plan": "anthropic/claude-opus-4-20250514",
     },
     "quality": {
-        "refine":         "anthropic/claude-sonnet-4-20250514",
-        "brainstorm":     "anthropic/claude-opus-4-20250514",
-        "review":         "anthropic/claude-opus-4-20250514",
+        # Maximize quality — use best models everywhere
+        "refine": "anthropic/claude-sonnet-4-20250514",
+        "brainstorm": "anthropic/claude-opus-4-20250514",
+        "review": "anthropic/claude-opus-4-20250514",
         "review_confirm": "anthropic/claude-opus-4-20250514",
-        "title_gen":      "anthropic/claude-sonnet-4-20250514",
-        "commit_msg":     "anthropic/claude-sonnet-4-20250514",
-        "implement":      "anthropic/claude-opus-4-20250514",
-        "plan":           "anthropic/claude-opus-4-20250514",
+        "title_gen": "anthropic/claude-sonnet-4-20250514",
+        "commit_msg": "anthropic/claude-sonnet-4-20250514",
+        "implement": "anthropic/claude-opus-4-20250514",
+        "plan": "anthropic/claude-opus-4-20250514",
     },
 }
 
 
 class ModelRouter:
-    """Routes tasks to the appropriate model based on a named routing profile."""
+    """Routes tasks to appropriate models based on a routing profile.
 
-    def __init__(self, profile: str = "balanced"):
+    Usage:
+        router = ModelRouter("cheap")  # or "balanced" or "quality"
+        model = router.get("refine")   # → "gemini/gemini-2.5-flash"
+
+        # Override specific routes:
+        router = ModelRouter("cheap", overrides={"brainstorm": "anthropic/claude-opus-4-20250514"})
+    """
+
+    def __init__(self, profile: str = "balanced", overrides: dict = None):
         if profile not in ROUTING_PROFILES:
-            raise ValueError(f"Unknown routing profile '{profile}'. Choose from: {list(ROUTING_PROFILES)}")
-        self.profile = profile
-        self._routes = ROUTING_PROFILES[profile]
+            raise ValueError(f"Unknown profile: '{profile}'. Use: {list(ROUTING_PROFILES.keys())}")
+
+        self.profile_name = profile
+        self.routes = {**ROUTING_PROFILES[profile]}
+
+        if overrides:
+            self.routes.update(overrides)
+            log.info(f"  Router: {profile} profile with overrides: {overrides}")
+        else:
+            log.info(f"  Router: {profile} profile")
 
     def get(self, task: str) -> str:
-        """Return the model string for the given task."""
-        if task not in self._routes:
-            raise ValueError(f"Unknown task '{task}' for profile '{self.profile}'. Known tasks: {list(self._routes)}")
-        return self._routes[task]
+        """Get the model string for a task type."""
+        if task not in self.routes:
+            log.warning(f"  No route for task '{task}', falling back to refine model")
+            return self.routes.get("refine", "anthropic/claude-sonnet-4-20250514")
+        return self.routes[task]
 
     def summary(self) -> str:
-        """Return a human-readable summary of the active routing profile."""
-        lines = [f"ModelRouter profile={self.profile!r}"]
-        for task, model in self._routes.items():
-            lines.append(f"  {task:<16} → {model}")
+        lines = [f"Router profile: {self.profile_name}"]
+        for task, model in sorted(self.routes.items()):
+            pricing = PRICING.get(model, (0, 0))
+            lines.append(f"  {task:12s} → {model:45s} (${pricing[0]:.2f}/${pricing[1]:.2f} per 1M)")
         return "\n".join(lines)
 
 
