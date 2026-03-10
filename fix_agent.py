@@ -167,9 +167,10 @@ class FixAgent:
 
         log.info(f"  Affected files: {affected_files}")
 
+        branch = pr.head.ref
+
         # Sync PR branch with main to resolve conflicts
         if not self.dry_run:
-            branch = pr.head.ref
             try:
                 self.repo.merge(
                     base=branch,
@@ -309,7 +310,8 @@ class FixAgent:
             if LABEL_NEEDS_HUMAN in pr_labels:
                 continue  # Escalated
             # Check for a FOREMAN review with issues
-            review = self._get_latest_foreman_review(pr)
+            reviews = self._get_all_foreman_reviews(pr)
+            review = reviews[-1] if reviews else None
             if review:
                 fixable.append(pr)
         return fixable
