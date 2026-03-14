@@ -7,12 +7,13 @@ Supports:
   - Combined budget enforcement
   - Telegram alerts when thresholds are hit
 
-This module is imported by agents, not run standalone.
+This module is imported by agents, but can be run standalone to view costs.
 """
 
 import os
 import json
 import logging
+import argparse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -57,33 +58,55 @@ class CostTracker:
 
     def record(self, model: str, usage, agent: str = "unknown", action: str = "unknown") -> float:
         """Record an API call's cost. Returns the cost of this call."""
-        input_tokens = usage.input_tokens
-        output_tokens = usage.output_tokens
-        
-        cost = estimate_cost(model, input_tokens, output_tokens)
-        
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_cost += cost
-        self.calls += 1
-        
-        self.records.append(CostRecord(
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            agent=agent,
-            model=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=cost,
-            action=action,
-        ))
-        log.info(
-            f"  💰 {action}: ${cost:.4f} ({model}) | "
-            f"Session: ${self.total_cost:.4f} / ${self.ceiling_usd:.2f} "
-            f"({self.total_cost/self.ceiling_usd*100:.0f}%)"
-        )
-        # Check alert thresholds
-        self._check_alerts()
-        return cost
+        try:
+            input_tokens = usage.input_tokens
+            output_tokens = usage.output_tokens
+            
+            cost = estimate_cost(model, input_tokens, output_tokens)
+            
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
+            self.total_cost += cost
+            self.calls += 1
+            
+            record = CostRecord(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                agent=agent,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+                action=action,
+            )
+            self.records.append(record)
+            
+            # Persistent logging — append every call immediately to costs.jsonl
+            try:
+                p = Path("costs.jsonl")
+                with p.open("a") as f:
+                    f.write(json.dumps({
+                        "timestamp": record.timestamp,
+                        "agent": record.agent,
+                        "model": record.model,
+                        "input_tokens": record.input_tokens,
+                        "output_tokens": record.output_tokens,
+                        "cost_usd": record.cost_usd,
+                        "action": record.action,
+                    }) + "\n")
+            except Exception as e:
+                log.error(f"Failed to append to costs.jsonl: {e}")
+
+            log.info(
+                f"  💰 {action}: ${cost:.4f} ({model}) | "
+                f"Session: ${self.total_cost:.4f} / ${self.ceiling_usd:.2f} "
+                f"({self.total_cost/self.ceiling_usd*100:.0f}%)"
+            )
+            # Check alert thresholds
+            self._check_alerts()
+            return cost
+        except Exception as e:
+            log.error(f"Error recording API cost in CostTracker: {e}")
+            return 0.0
 
     def _check_alerts(self):
         """Fire alerts at budget thresholds."""
@@ -229,3 +252,65 @@ def create_cost_system(
     cloud = CloudCostMonitor(provider=cloud_provider)
     cloud.daily_budget_usd = cloud_daily_budget_usd
     return api, cloud
+
+
+# ─── CLI Summary Utility ─────────────────────────────────────
+
+def print_daily_summary(path: str = "costs.jsonl"):
+    """Reads costs.jsonl and prints a summary aggregated by date."""
+    try:
+        p = Path(path)
+        if not p.exists():
+            print(f"\nNo cost history found at {path}")
+            return
+
+        daily_data = {}  # date -> cost
+        
+        with p.open("r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    ts = entry.get("timestamp")
+                    if not ts:
+                        continue
+                    # Extract date YYYY-MM-DD from ISO timestamp
+                    date = ts.split("T")[0]
+                    cost = entry.get("cost_usd", 0.0)
+                    daily_data[date] = daily_data.get(date, 0.0) + cost
+                except json.JSONDecodeError:
+                    continue
+                except Exception:
+                    continue
+
+        if not daily_data:
+            print(f"\nNo valid records found in {path}")
+            return
+
+        print("\n" + "="*45)
+        print(f"{'DATE':<15} | {'DAILY COST (USD)':<20}")
+        print("-" * 45)
+        
+        # Sort dates descending (newest first)
+        for date in sorted(daily_data.keys(), reverse=True):
+            print(f"{date:<15} | ${daily_data[date]:>18.4f}")
+        
+        total_all_time = sum(daily_data.values())
+        print("-" * 45)
+        print(f"{'TOTAL ALL-TIME':<15} | ${total_all_time:>18.4f}")
+        print("="*45 + "\n")
+        
+    except Exception as e:
+        print(f"Error generating daily summary: {e}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="FOREMAN Cost Monitor CLI")
+    parser.add_argument("--cost-summary", action="store_true", help="Display daily cost summary from costs.jsonl")
+    args = parser.parse_args()
+    
+    if args.cost_summary:
+        print_daily_summary()
+    else:
+        parser.print_help()
