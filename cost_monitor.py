@@ -16,26 +16,9 @@ import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dataclasses import dataclass, field
+from llm_client import estimate_cost
 
 log = logging.getLogger("foreman.costs")
-
-# ─── API Cost Tracking ───────────────────────────────────────
-
-# Pricing per 1M tokens (update as needed)
-MODEL_PRICING = {
-    "claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
-    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
-    "claude-opus-4-6":           {"input": 15.0, "output": 75.0},
-    "anthropic/claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
-    "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
-    "anthropic/claude-opus-4-6":           {"input": 15.0, "output": 75.0},
-    "gemini/gemini-2.5-pro":               {"input": 1.25, "output": 10.0},
-    "gemini/gemini-2.5-flash":             {"input": 0.15, "output": 0.60},
-    "gemini/gemini-2.5-flash-lite":        {"input": 0.075, "output": 0.30},
-    "gemini/gemini-3.1-pro-preview":       {"input": 1.25, "output": 10.0},
-    "gemini/gemini-3-flash-preview":       {"input": 0.15, "output": 0.60},
-    "gemini/gemini-3.1-flash-lite-preview":{"input": 0.075, "output": 0.30},
-}
 
 
 @dataclass
@@ -76,15 +59,14 @@ class CostTracker:
         """Record an API call's cost. Returns the cost of this call."""
         input_tokens = usage.input_tokens
         output_tokens = usage.output_tokens
-
-        pricing = MODEL_PRICING.get(model, {"input": 3.0, "output": 15.0})
-        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
-
+        
+        cost = estimate_cost(model, input_tokens, output_tokens)
+        
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
         self.total_cost += cost
         self.calls += 1
-
+        
         self.records.append(CostRecord(
             timestamp=datetime.now(timezone.utc).isoformat(),
             agent=agent,
@@ -94,34 +76,34 @@ class CostTracker:
             cost_usd=cost,
             action=action,
         ))
-
         log.info(
             f"  💰 {action}: ${cost:.4f} ({model}) | "
             f"Session: ${self.total_cost:.4f} / ${self.ceiling_usd:.2f} "
             f"({self.total_cost/self.ceiling_usd*100:.0f}%)"
         )
-
         # Check alert thresholds
         self._check_alerts()
-
         return cost
 
     def _check_alerts(self):
         """Fire alerts at budget thresholds."""
-        pct = self.total_cost / self.ceiling_usd if self.ceiling_usd > 0 else 0
-        for threshold in self._alert_thresholds:
-            if pct >= threshold and threshold not in self._alerts_fired:
-                self._alerts_fired.add(threshold)
-                msg = (
-                    f"⚠️ BUDGET ALERT: {threshold*100:.0f}% of ${self.ceiling_usd:.2f} "
-                    f"(${self.total_cost:.4f} spent, {self.calls} calls)"
-                )
-                log.warning(msg)
-                if self._notify_fn:
-                    try:
-                        self._notify_fn(msg)
-                    except Exception as e:
-                        log.error(f"Failed to send alert: {e}")
+        try:
+            pct = self.total_cost / self.ceiling_usd if self.ceiling_usd > 0 else 0
+            for threshold in self._alert_thresholds:
+                if pct >= threshold and threshold not in self._alerts_fired:
+                    self._alerts_fired.add(threshold)
+                    msg = (
+                        f"⚠️ BUDGET ALERT: {threshold*100:.0f}% of ${self.ceiling_usd:.2f} "
+                        f"(${self.total_cost:.4f} spent, {self.calls} calls)"
+                    )
+                    log.warning(msg)
+                    if self._notify_fn:
+                        try:
+                            self._notify_fn(msg)
+                        except Exception as e:
+                            log.error(f"Failed to send alert: {e}")
+        except Exception as e:
+            log.error(f"Error checking budget alerts: {e}")
 
     def check_ceiling(self) -> bool:
         """Returns True if under budget. Logs warning if over."""
@@ -162,19 +144,22 @@ class CostTracker:
 
     def save_session(self, path: str = "cost_log.jsonl"):
         """Append session records to a JSONL file for analysis."""
-        p = Path(path)
-        with p.open("a") as f:
-            for r in self.records:
-                f.write(json.dumps({
-                    "timestamp": r.timestamp,
-                    "agent": r.agent,
-                    "model": r.model,
-                    "input_tokens": r.input_tokens,
-                    "output_tokens": r.output_tokens,
-                    "cost_usd": r.cost_usd,
-                    "action": r.action,
-                }) + "\n")
-        log.info(f"📝 Saved {len(self.records)} cost records to {path}")
+        try:
+            p = Path(path)
+            with p.open("a") as f:
+                for r in self.records:
+                    f.write(json.dumps({
+                        "timestamp": r.timestamp,
+                        "agent": r.agent,
+                        "model": r.model,
+                        "input_tokens": r.input_tokens,
+                        "output_tokens": r.output_tokens,
+                        "cost_usd": r.cost_usd,
+                        "action": r.action,
+                    }) + "\n")
+            log.info(f"📝 Saved {len(self.records)} cost records to {path}")
+        except Exception as e:
+            log.error(f"Failed to save session costs: {e}")
 
 
 # ─── Cloud Cost Monitoring ───────────────────────────────────
@@ -196,16 +181,20 @@ class CloudCostMonitor:
 
     def get_today_spend(self) -> float:
         """Get today's cloud infrastructure spend in USD."""
-        if self.provider == "local":
-            return 0.0  # Running locally, no cloud cost
+        try:
+            if self.provider == "local":
+                return 0.0  # Running locally, no cloud cost
 
-        if self.provider == "gcp":
-            return self._get_gcp_spend()
+            if self.provider == "gcp":
+                return self._get_gcp_spend()
 
-        if self.provider == "railway":
-            return self._get_railway_spend()
+            if self.provider == "railway":
+                return self._get_railway_spend()
 
-        return 0.0
+            return 0.0
+        except Exception as e:
+            log.error(f"Failed to get cloud spend: {e}")
+            return 0.0
 
     def check_budget(self) -> tuple[bool, float]:
         """Returns (under_budget: bool, spend: float)."""
@@ -218,33 +207,12 @@ class CloudCostMonitor:
         return ok, spend
 
     def _get_gcp_spend(self) -> float:
-        """Query GCP billing API for today's spend.
-
-        Requires:
-          - GOOGLE_CLOUD_PROJECT env var
-          - GOOGLE_APPLICATION_CREDENTIALS or ADC configured
-          - Billing API enabled on the project
-          - billing.viewer role on the billing account
-
-        Implementation deferred to cloud deployment phase.
-        """
-        # TODO: Implement when deploying to GCP
-        # from google.cloud import billing_v1
-        # client = billing_v1.CloudBillingClient()
-        # ...
+        """Query GCP billing API for today's spend."""
         log.info("  GCP cost check: not yet implemented")
         return 0.0
 
     def _get_railway_spend(self) -> float:
-        """Query Railway API for current usage.
-
-        Requires:
-          - RAILWAY_TOKEN env var
-          - Railway API access
-
-        Implementation deferred to cloud deployment phase.
-        """
-        # TODO: Implement when deploying to Railway
+        """Query Railway API for current usage."""
         log.info("  Railway cost check: not yet implemented")
         return 0.0
 
@@ -256,22 +224,7 @@ def create_cost_system(
     cloud_provider: str = "local",
     cloud_daily_budget_usd: float = 2.0,
 ) -> tuple[CostTracker, CloudCostMonitor]:
-    """Create the full cost monitoring system.
-
-    Returns (api_tracker, cloud_monitor) — agents check both before each action.
-
-    Usage in agent loop:
-        api_costs, cloud_costs = create_cost_system(api_ceiling_usd=5.0)
-
-        # Before each API call:
-        if not api_costs.check_ceiling():
-            break  # park the agent
-
-        # Periodically (every N minutes):
-        cloud_ok, cloud_spend = cloud_costs.check_budget()
-        if not cloud_ok:
-            break  # park the agent
-    """
+    """Create the full cost monitoring system."""
     api = CostTracker(ceiling_usd=api_ceiling_usd)
     cloud = CloudCostMonitor(provider=cloud_provider)
     cloud.daily_budget_usd = cloud_daily_budget_usd
