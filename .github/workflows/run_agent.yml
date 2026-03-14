@@ -50,3 +50,5 @@ jobs:
           ROUTING_PROFILE: cheap
           COST_CEILING_USD: "2.0"
           BRAINSTORM_MAX_DRAFTS: "3"
+          AUTO_PROMOTE_DELAY_HOURS: "2"
+          AUTO_PROMOTE_MAX_PER_CYCLE: "3"
