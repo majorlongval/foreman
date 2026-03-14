@@ -45,6 +45,12 @@ litellm.drop_params = True # Silently drop unsupported params like thinking_conf
 # ─── Response ────────────────────────────────────────────────
 
 @dataclass
+class TokenUsage:
+    """Unified token usage counts for cost tracking."""
+    input_tokens: int
+    output_tokens: int
+
+@dataclass
 class LLMResponse:
     """Unified response from any LLM provider."""
     text: str
@@ -120,7 +126,8 @@ class LLMClient:
         resp = llm.complete("gemini/gemini-2.5-flash", "You are...", "Do X", 2000)
     """
 
-    def __init__(self):
+    def __init__(self, tracker=None):
+        self.tracker = tracker
         self._ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         # Map existing env vars to litellm expected names if needed
         if os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
@@ -132,6 +139,8 @@ class LLMClient:
         system: str,
         message: str,
         max_tokens: int = None,
+        agent: str = "unknown",
+        action: str = "unknown",
     ) -> LLMResponse:
         """Send a completion request to any supported provider via LiteLLM."""
         try:
@@ -164,6 +173,19 @@ class LLMClient:
             input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
             output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
             cost = estimate_cost(model, input_tokens, output_tokens)
+
+            # Record cost if tracker is attached
+            if self.tracker:
+                try:
+                    self.tracker.record(
+                        model=model,
+                        usage=TokenUsage(input_tokens, output_tokens),
+                        agent=agent,
+                        action=action
+                    )
+                except Exception as e:
+                    log.error(f"  Cost recording failed: {e}")
+
             log.info(f"  ✓ {input_tokens} in / {output_tokens} out = ${cost:.4f}")
             return LLMResponse(
                 text=text,
@@ -178,7 +200,7 @@ class LLMClient:
             log.error(f"  LLM complete call failed: {e}")
             raise
 
-    def generate_embedding(self, text: str, model: str = None) -> List[float]:
+    def generate_embedding(self, text: str, model: str = None, agent: str = "unknown", action: str = "embed") -> List[float]:
         """Generate a text embedding using LiteLLM."""
         try:
             if not model:
@@ -202,6 +224,24 @@ class LLMClient:
             response = litellm.embedding(**kwargs)
             if not getattr(response, "data", None):
                 raise ValueError(f"LLM API returned no embedding data (possibly blocked). Raw response: {response}")
+            
+            # Record cost if tracker is attached
+            usage = getattr(response, "usage", None)
+            input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+            cost = estimate_cost(model, input_tokens, 0)
+            
+            if self.tracker:
+                try:
+                    self.tracker.record(
+                        model=model,
+                        usage=TokenUsage(input_tokens, 0),
+                        agent=agent,
+                        action=action
+                    )
+                except Exception as e:
+                    log.error(f"  Cost recording for embedding failed: {e}")
+            
+            log.info(f"  ✓ embedding {input_tokens} tokens = ${cost:.4f}")
             return response.data[0].embedding
         except Exception as e:
             log.error(f"  Embedding generation failed: {e}")
