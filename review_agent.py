@@ -117,6 +117,7 @@ class PRReviewer:
     def __init__(self, token: str, repo_name: str, dry_run: bool = False):
         self.gh = Github(auth=__import__("github").Auth.Token(token))
         self.repo = self.gh.get_repo(repo_name)
+        self.bot_login = self.gh.get_user().login
         self.llm = LLMClient()
         self.router = ModelRouter(ROUTING_PROFILE)
         self.cost = CostTracker(ceiling_usd=COST_CEILING_USD)
@@ -306,7 +307,11 @@ class PRReviewer:
                 log.info(f"  [DRY RUN] Would post APPROVE and auto-merge PR #{pr.number}")
                 self.stats["reviewed"] += 1
                 return True
-            pr.create_review(body=review_body_2 + BOT_SIGNATURE, event="APPROVE")
+            is_own_pr = pr.user.login == self.bot_login
+            approve_event = "COMMENT" if is_own_pr else "APPROVE"
+            if is_own_pr:
+                log.info(f"  ℹ️ PR #{pr.number} is authored by bot — posting COMMENT instead of APPROVE (GitHub restriction)")
+            pr.create_review(body=review_body_2 + BOT_SIGNATURE, event=approve_event)
             pr.add_to_labels(self.repo.get_label(LABEL_REVIEWED))
             self.stats["reviewed"] += 1
             if self._should_auto_merge(pr, review_data_2):
