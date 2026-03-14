@@ -1,11 +1,8 @@
 """
-FOREMAN Implement Agent — v0.1
-Reads 'ready' issues, generates code, commits to a branch, opens a PR.
-Usage:
-  python implement_agent.py                 # Run the loop
   python implement_agent.py --once          # Single pass then exit
   python implement_agent.py --issue 8       # Process a specific issue
   python implement_agent.py --dry-run       # Plan + LLM calls, no GitHub writes
+  python implement_agent.py --cost-summary  # Display daily cost summary
 """
 import os
 import re
@@ -19,6 +16,7 @@ from github import Github, GithubException
 from cost_monitor import CostTracker
 from llm_client import LLMClient, ModelRouter
 from telegram_notifier import notify as tg
+
 # ─── Configuration ────────────────────────────────────────────
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("FOREMAN_REPO", "")
@@ -29,6 +27,7 @@ MAX_FILES_PER_ISSUE = int(os.environ.get("MAX_FILES_PER_ISSUE", "10"))
 LABEL_READY = "ready"
 LABEL_IMPLEMENTING = "foreman-implementing"
 LABEL_READY_FOR_REVIEW = "ready-for-review"
+
 # ─── Logging ──────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +35,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("foreman.implement")
+
 def get_coding_standards() -> str:
     """Reads STANDARDS.md from the repository root."""
     try:
@@ -47,6 +47,7 @@ def get_coding_standards() -> str:
     except Exception as e:
         log.error(f"Error reading STANDARDS.md: {e}")
         return "Error loading coding standards."
+
 # ─── Prompts ─────────────────────────────────────────────────
 PLAN_SYSTEM = """You are FOREMAN, an autonomous implementation agent.
 You will receive a GitHub issue (title + structured body) and the current repository file tree.
@@ -74,6 +75,7 @@ Rules:
 - NEVER touch files unrelated to the acceptance criteria
 - Prefer creating new files over modifying large existing ones
 - No markdown fences. Pure JSON only."""
+
 IMPLEMENT_SYSTEM = f"""You are FOREMAN, an autonomous code implementation agent.
 You will receive a GitHub issue, an implementation plan, the specific file to write,
 and contents of relevant existing files for context.
@@ -88,6 +90,7 @@ Rules:
 - Wrap everything in try/except — never let an unhandled exception crash a loop
 - Keep it simple and focused. No over-engineering.
 - If modifying an existing file, preserve all existing code and only add/change what's needed"""
+
 # ─── GitHub Client ────────────────────────────────────────────
 class GitHubClient:
     def __init__(self, token: str, repo_name: str, dry_run: bool = False):
@@ -95,6 +98,7 @@ class GitHubClient:
         self.repo = self.gh.get_repo(repo_name)
         self.dry_run = dry_run
         self._ensure_labels()
+
     def _ensure_labels(self):
         existing = {l.name for l in self.repo.get_labels()}
         needed = {
@@ -107,6 +111,7 @@ class GitHubClient:
                 if not self.dry_run:
                     self.repo.create_label(name=name, color=color)
                 log.info(f"  Created label: {name}")
+
     def get_implementation_queue(self) -> list:
         try:
             issues = self.repo.get_issues(
@@ -126,8 +131,10 @@ class GitHubClient:
                 continue
             queue.append(issue)
         return queue
+
     def get_issue(self, number: int):
         return self.repo.get_issue(number)
+
     def get_repo_tree(self) -> list[str]:
         try:
             sha = self.repo.get_branch("main").commit.sha
@@ -136,6 +143,7 @@ class GitHubClient:
         except GithubException as e:
             log.error(f"  Failed to get repo tree: {e}")
             return []
+
     def get_file_contents(self, path: str, branch: str = None) -> tuple:
         try:
             kwargs = {"ref": branch} if branch else {}
@@ -143,6 +151,7 @@ class GitHubClient:
             return f.decoded_content.decode("utf-8"), f.sha
         except Exception:
             return None, None
+
     def ensure_branch(self, branch_name: str):
         if self.dry_run:
             log.info(f"  [DRY RUN] Would create branch: {branch_name}")
@@ -156,6 +165,7 @@ class GitHubClient:
             pass
         self.repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=sha)
         log.info(f"  Created branch: {branch_name}")
+
     def commit_file(self, branch: str, path: str, content: str, message: str, existing_sha: str = None):
         if self.dry_run:
             log.info(f"  [DRY RUN] Would commit {path} to {branch}")
@@ -177,6 +187,7 @@ class GitHubClient:
         except GithubException as e:
             log.error(f"  Failed to commit {path}: {e}")
             raise
+
     def create_pr(self, branch: str, title: str, body: str) -> object:
         if self.dry_run:
             log.info(f"  [DRY RUN] Would open PR: {title}")
@@ -188,6 +199,7 @@ class GitHubClient:
         except GithubException as e:
             log.error(f"  Failed to create PR: {e}")
             raise
+
 # ─── Implement Agent ──────────────────────────────────────────
 class ImplementAgent:
     def __init__(self, github: GitHubClient, dry_run: bool = False):
@@ -198,11 +210,13 @@ class ImplementAgent:
         self.dry_run = dry_run
         self.stats = {"implemented": 0, "skipped": 0, "failed": 0}
         log.info(f"\n{self.router.summary()}\n")
+
     def _complete(self, task: str, system: str, message: str, max_tokens: int = None):
         model = self.router.get(task)
         response = self.llm.complete(model, system, message, max_tokens)
         self.cost.record(model, response, agent="implement", action=task)
         return response
+
     def _parse_json(self, text: str, label: str) -> dict | None:
         raw = text.strip()
         if raw.startswith("```"):
@@ -216,9 +230,11 @@ class ImplementAgent:
             log.error(f"  Failed to parse {label} JSON: {e}")
             log.error(f"  Raw: {raw[:500]}")
             return None
+
     def _slugify(self, text: str, max_len: int = 40) -> str:
         slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
         return slug[:max_len].rstrip("-")
+
     def _extract_section(self, body: str, section: str) -> str:
         if not body:
             return ""
@@ -227,6 +243,7 @@ class ImplementAgent:
             return ""
         block = parts[1].split("##")[0].strip()
         return block
+
     def _build_plan_message(self, issue, file_tree: list[str]) -> str:
         tree_str = "\n".join(f"  {p}" for p in file_tree[:500])
         return (
@@ -234,6 +251,7 @@ class ImplementAgent:
             f"{issue.body or '(no body)'}\n\n"
             f"## Repository File Tree\n\n{tree_str}"
         )
+
     def _build_implement_message(self, issue, plan: dict, file_spec: dict, context: dict) -> str:
         context_str = ""
         is_modify = file_spec["action"] == "modify"
@@ -251,6 +269,7 @@ class ImplementAgent:
             f"Description: {file_spec['description']}\n\n"
             f"## Context Files\n{context_str}"
         )
+
     def _build_pr_body(self, issue, plan: dict, branch: str) -> str:
         files_list = "\n".join(
             f"- `{f['path']}` ({f['action']}): {f['description']}"
@@ -264,6 +283,7 @@ class ImplementAgent:
             f"## Acceptance Criteria\n\n{acceptance}\n\n"
             f"---\n_Implemented by FOREMAN_"
         )
+
     def process_issue(self, issue) -> bool:
         log.info(f"🔨 Implementing #{issue.number}: {issue.title}")
         if not self.dry_run:
@@ -355,6 +375,7 @@ class ImplementAgent:
                     issue.remove_from_labels(LABEL_IMPLEMENTING)
                 except Exception:
                     pass
+
     def run_once(self, issue_number: int = None) -> dict:
         log.info("=" * 60)
         log.info(f"🔄 FOREMAN implement pass @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
@@ -374,6 +395,7 @@ class ImplementAgent:
         log.info(f"📊 Stats: {self.stats}")
         log.info(f"💰 {self.cost.summary()}")
         return self.stats
+
     def run_loop(self):
         log.info("🚀 FOREMAN implement agent starting")
         log.info(f"   Repo: {REPO_NAME}")
@@ -390,6 +412,7 @@ class ImplementAgent:
             log.info(f"📊 Final stats: {self.stats}")
             log.info(f"💰 {self.cost.summary()}")
             self.cost.save_session()
+
 # ─── CLI ──────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="FOREMAN Implement Agent")
@@ -397,16 +420,29 @@ def main():
     parser.add_argument("--issue", type=int, default=None, help="Process a specific issue number")
     parser.add_argument("--dry-run", action="store_true", help="Plan + LLM, no GitHub writes")
     parser.add_argument("--profile", default=None, help="Routing profile: cheap, balanced, quality")
+    parser.add_argument("--cost-summary", action="store_true", help="Display daily cost summary")
     args = parser.parse_args()
+
     global ROUTING_PROFILE
     if args.profile:
         ROUTING_PROFILE = args.profile
+
+    if args.cost_summary:
+        try:
+            from cost_monitor import print_daily_summary
+            print_daily_summary()
+            sys.exit(0)
+        except Exception as e:
+            log.error(f"Failed to display cost summary: {e}")
+            sys.exit(1)
+
     if not GITHUB_TOKEN:
         log.error("❌ GITHUB_TOKEN not set")
         sys.exit(1)
     if not REPO_NAME:
         log.error("❌ FOREMAN_REPO not set")
         sys.exit(1)
+
     github = GitHubClient(GITHUB_TOKEN, REPO_NAME, dry_run=args.dry_run)
     agent = ImplementAgent(github, dry_run=args.dry_run)
     if args.once or args.issue:
@@ -415,5 +451,6 @@ def main():
             sys.exit(1)
     else:
         agent.run_loop()
+
 if __name__ == "__main__":
     main()
