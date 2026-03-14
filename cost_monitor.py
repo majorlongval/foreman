@@ -57,41 +57,31 @@ class CostTracker:
 
     def record(self, model: str, usage, agent: str = "unknown", action: str = "unknown") -> float:
         """Record an API call's cost. Returns the cost of this call."""
-        try:
-            input_tokens = usage.input_tokens
-            output_tokens = usage.output_tokens
-
-            pricing = MODEL_PRICING.get(model, {"input": 3.0, "output": 15.0})
-            cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
-
-            self.total_input_tokens += input_tokens
-            self.total_output_tokens += output_tokens
-            self.total_cost += cost
-            self.calls += 1
-
-            self.records.append(CostRecord(
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                agent=agent,
-                model=model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cost_usd=cost,
-                action=action,
-            ))
-
-            log.info(
-                f"  💰 {action}: ${cost:.4f} ({model}) | "
-                f"Session: ${self.total_cost:.4f} / ${self.ceiling_usd:.2f} "
-                f"({self.total_cost/self.ceiling_usd*100:.0f}%)"
-            )
-
-            # Check alert thresholds
-            self._check_alerts()
-
-            return cost
-        except Exception as e:
-            log.error(f"Failed to record cost: {e}")
-            return 0.0
+        input_tokens = usage.input_tokens
+        output_tokens = usage.output_tokens
+        pricing = MODEL_PRICING.get(model, {"input": 3.0, "output": 15.0})
+        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+        self.total_input_tokens += input_tokens
+        self.total_output_tokens += output_tokens
+        self.total_cost += cost
+        self.calls += 1
+        self.records.append(CostRecord(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            agent=agent,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost,
+            action=action,
+        ))
+        log.info(
+            f"  💰 {action}: ${cost:.4f} ({model}) | "
+            f"Session: ${self.total_cost:.4f} / ${self.ceiling_usd:.2f} "
+            f"({self.total_cost/self.ceiling_usd*100:.0f}%)"
+        )
+        # Check alert thresholds
+        self._check_alerts()
+        return cost
 
     def _check_alerts(self):
         """Fire alerts at budget thresholds."""
