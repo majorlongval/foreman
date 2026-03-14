@@ -26,7 +26,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install --quiet anthropic PyGithub google-genai
+        run: pip install --quiet -r requirements.txt
 
       - name: Run Review Agent
         run: python review_agent.py --once
