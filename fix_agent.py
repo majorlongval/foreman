@@ -54,19 +54,25 @@ log = logging.getLogger("foreman.fixer")
 
 # ─── Fix Prompt ──────────────────────────────────────────────
 
-FIX_SYSTEM = """You are FOREMAN's code patcher. You receive a file and a review history
-containing issues with suggested fixes written by a senior reviewer.
+PATCH_SYSTEM = """You are FOREMAN's code patcher. You receive a file and review issues with suggested fixes.
 
-Your ONLY job is to apply the suggested fixes exactly as specified.
+Your ONLY job: output a JSON array of search/replace operations.
+
+Each operation:
+{
+  "search": "exact existing code to find (multi-line OK, must be unique in file)",
+  "replace": "exact replacement code",
+  "issue": "which review issue this addresses"
+}
 
 Rules:
-- Apply every "Suggested fix" from CRITICAL and IMPORTANT issues.
-- Do NOT change anything not covered by a suggested fix.
-- Do NOT refactor, rename, or "improve" anything not mentioned.
-- Do NOT add features, comments, or documentation not requested.
-- If a suggested fix conflicts with the current code, apply the intent of the fix.
-- Output ONLY the complete patched file content. No markdown fences. No explanation.
-  The raw file content starts at character 0.
+- Output ONLY valid JSON. No markdown fences. No explanation.
+- Each search string MUST appear exactly once in the file.
+- Each search string MUST include enough surrounding context lines to be unique.
+- ONLY address CRITICAL and IMPORTANT issues from the review.
+- Do NOT add operations for things not mentioned in the review.
+- Do NOT "clean up" or "improve" anything beyond the review scope.
+- If a suggested fix is provided verbatim in the review, use it exactly.
 """
 
 
@@ -283,6 +289,7 @@ class FixAgent:
                 pass
 
         fixes_applied = []
+        fixes_ready = []  # (filepath, patched_content, file_sha) — collected before push
 
         try:
             for filepath in affected_files:
@@ -305,57 +312,83 @@ class FixAgent:
                     history_parts.append(f"**Round {i+1}:**\n{issues}")
                 review_history = "\n\n---\n".join(history_parts)
 
-                # Generate fix
-                log.info(f"  Generating fix for {filepath} ({len(all_reviews)} review round(s) of context)")
+                # Generate patches — up to 2 attempts
                 model = self.router.get("fix")
-                response = self.llm.complete(
-                    model=model,
-                    system=FIX_SYSTEM,
-                    message=(
-                        f"## Review History\n\n{review_history}\n\n"
-                        f"## Current File: {filepath}\n\n{current_content}"
-                    ),
-                    max_tokens=None,
+                log.info(f"  Generating patches for {filepath} ({len(all_reviews)} review round(s) of context)")
+                prompt = (
+                    f"## Review History\n\n{review_history}\n\n"
+                    f"## Current File: {filepath}\n\n{current_content}"
                 )
-                self.cost.record(model, response, agent="fixer", action="fix")
 
-                fixed_content = response.text
-                if not fixed_content or not fixed_content.strip():
-                    log.error(f"  Empty fix for {filepath} — skipping")
-                    continue
+                patched = None
+                for attempt in range(2):
+                    response = self.llm.complete(
+                        model=model,
+                        system=PATCH_SYSTEM,
+                        message=prompt,
+                        max_tokens=None,
+                    )
+                    self.cost.record(model, response, agent="fixer", action="fix")
 
-                # Syntax check Python files
-                if filepath.endswith(".py"):
-                    import ast
-                    try:
-                        ast.parse(fixed_content)
-                    except SyntaxError as e:
-                        log.error(f"  Syntax error in fix for {filepath}: {e} — skipping")
+                    patches = parse_json(response.text)
+                    if not patches:
+                        log.warning(f"  Attempt {attempt+1}: invalid JSON response for {filepath}")
+                        prompt += "\n\nYour previous response was not valid JSON. Output ONLY a JSON array."
                         continue
 
-                # Skip if content unchanged
-                if fixed_content.strip() == current_content.strip():
+                    patched_content, errors = apply_patches(current_content, patches)
+                    if errors:
+                        log.warning(f"  Attempt {attempt+1}: patch errors for {filepath}: {errors}")
+                        prompt += f"\n\nPatch application failed:\n" + "\n".join(errors) + "\nFix your search strings."
+                        continue
+
+                    warnings = check_scope(current_content, patched_content, review_body)
+                    if warnings:
+                        log.warning(f"  Scope warnings for {filepath}: {warnings}")
+
+                    if filepath.endswith(".py"):
+                        import ast
+                        try:
+                            ast.parse(patched_content)
+                        except SyntaxError as e:
+                            log.warning(f"  Attempt {attempt+1}: syntax error in patched {filepath}: {e}")
+                            prompt += f"\n\nPatched file has syntax error: {e}. Fix it."
+                            continue
+
+                    patched = patched_content
+                    break
+
+                if patched is None:
+                    log.error(f"  All patch attempts failed for {filepath} — skipping")
+                    self.stats["failed"] += 1
+                    continue
+
+                if patched.strip() == current_content.strip():
                     log.info(f"  No changes needed for {filepath}")
                     continue
 
-                # File size guard (same as implement_agent)
-                if len(fixed_content) > 900_000:
-                    log.error(f"  Fixed content for {filepath} too large ({len(fixed_content)} bytes) — skipping")
-                    continue
+                fixes_ready.append((filepath, patched, file_sha))
 
-                # Push fix
+            # Release fixing label BEFORE pushing so push-triggered review can run
+            if not self.dry_run:
+                try:
+                    pr.remove_from_labels(self.repo.get_label(LABEL_FIXING))
+                except Exception:
+                    pass
+
+            # Push all collected fixes
+            for filepath, patched, file_sha in fixes_ready:
                 if not self.dry_run:
                     self.repo.update_file(
                         filepath,
                         f"fix: address review comments in {filepath}",
-                        fixed_content,
+                        patched,
                         file_sha,
                         branch=branch,
                     )
                     log.info(f"  Pushed fix for {filepath}")
                 else:
                     log.info(f"  [DRY RUN] Would push fix for {filepath}")
-
                 fixes_applied.append(filepath)
 
             # Post summary comment
@@ -365,7 +398,6 @@ class FixAgent:
                 )
                 if not self.dry_run:
                     pr.create_issue_comment(summary + FIX_SIGNATURE)
-                    # Remove reviewed label so review agent runs again
                     try:
                         pr.remove_from_labels(self.repo.get_label(LABEL_REVIEWED))
                     except Exception:
@@ -386,7 +418,8 @@ class FixAgent:
             return False
 
         finally:
-            # Release fixing label
+            # Ensure fixing label is removed even on exception
+            # (normal path removes it before pushing; this is the safety net)
             if not self.dry_run:
                 try:
                     pr.remove_from_labels(self.repo.get_label(LABEL_FIXING))
