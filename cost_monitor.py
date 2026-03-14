@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dataclasses import dataclass, field
-from llm_client import PRICING as MODEL_PRICING
+from llm_client import estimate_cost
 
 log = logging.getLogger("foreman.costs")
 
@@ -59,8 +59,7 @@ class CostTracker:
         """Record an API call's cost. Returns the cost of this call."""
         input_tokens = usage.input_tokens
         output_tokens = usage.output_tokens
-        pricing = MODEL_PRICING.get(model, {"input": 3.0, "output": 15.0})
-        cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
+        cost = estimate_cost(model, input_tokens, output_tokens)
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
         self.total_cost += cost
