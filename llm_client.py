@@ -61,12 +61,10 @@ class LLMResponse:
 # Per 1M tokens: (input, output)
 PRICING = {
     # Anthropic
-    "claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
-    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
-    "claude-opus-4-6":           {"input": 15.0, "output": 75.0},
     "anthropic/claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
     "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
     "anthropic/claude-opus-4-6":           {"input": 15.0, "output": 75.0},
+    # Gemini
     "gemini/gemini-2.5-pro":               {"input": 1.25, "output": 10.0},
     "gemini/gemini-2.5-flash":             {"input": 0.15, "output": 0.60},
     "gemini/gemini-2.5-flash-lite":        {"input": 0.075, "output": 0.30},
@@ -99,7 +97,7 @@ def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> floa
         provider = model_key.split("/")[0]
         if provider in ("ollama", "lmstudio", "local"):
             return 0.0
-        log.warning(f"No pricing data for {model_key}, estimating $0")
+        log.warning(f"  Missing pricing for {model_key}, cost estimate will be $0.00")
         return 0.0
     return (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
 
@@ -132,7 +130,7 @@ class LLMClient:
             if "/" not in model:
                 raise ValueError(f"Model must be in 'provider/model' format, got: '{model}'")
 
-            provider, model_name = model.split("/", 1)
+            provider, _ = model.split("/", 1)
             
             kwargs = {
                 "model": model,
@@ -161,7 +159,7 @@ class LLMClient:
             log.info(f"  ✓ {input_tokens} in / {output_tokens} out = ${cost:.4f}")
             return LLMResponse(
                 text=text,
-                model=model_name,
+                model=model,
                 provider=provider,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
