@@ -177,7 +177,7 @@ class GitHubClient:
             return new_issue.number
         except Exception as e:
             log.error(f"Error creating refined issue: {e}")
-            return -1
+            raise
 
     def create_draft_issues(self, drafts: list[dict]) -> list[tuple[int, str]]:
         """Create draft issues from brainstorm output. Returns list of (number, title)."""
