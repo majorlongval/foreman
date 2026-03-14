@@ -56,6 +56,22 @@ class TestApplyPatches:
         assert "Patch 1" in errors[0]
         assert "not found" in errors[0]
 
+    def test_missing_required_keys_returns_error(self):
+        content = "hello there\n"
+        patches = [{"issue": "missing both keys"}]
+        result, errors = apply_patches(content, patches)
+        assert result == content  # unchanged
+        assert len(errors) == 1
+        assert "Patch 1" in errors[0]
+        assert "missing" in errors[0]
+
+    def test_missing_replace_key_returns_error(self):
+        content = "hello there\n"
+        patches = [{"search": "hello", "issue": "missing replace"}]
+        result, errors = apply_patches(content, patches)
+        assert result == content  # unchanged
+        assert len(errors) == 1
+
     def test_search_multiple_matches_returns_error(self):
         content = "foo\nfoo\n"
         patches = [{"search": "foo", "replace": "bar", "issue": "test"}]

@@ -103,8 +103,11 @@ def apply_patches(content: str, patches: list) -> tuple[str, list[str]]:
     """
     errors = []
     for i, patch in enumerate(patches, 1):
-        search = patch.get("search", "")
-        replace = patch.get("replace", "")
+        if "search" not in patch or "replace" not in patch:
+            errors.append(f"Patch {i}: missing required 'search' or 'replace' key")
+            continue
+        search = patch["search"]
+        replace = patch["replace"]
         count = content.count(search)
         if count == 0:
             errors.append(f"Patch {i}: search string not found in file")
