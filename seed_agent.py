@@ -36,6 +36,10 @@ BRAINSTORM_MAX_DRAFTS = int(os.environ.get("BRAINSTORM_MAX_DRAFTS", "5"))
 MAX_OPEN_DRAFTS = int(os.environ.get("MAX_OPEN_DRAFTS", "10"))
 COST_CEILING_USD = float(os.environ.get("COST_CEILING_USD", "5.0"))
 
+# Promotion logic
+AUTO_PROMOTE_DELAY_HOURS = int(os.environ.get("AUTO_PROMOTE_DELAY_HOURS", "2"))
+AUTO_PROMOTE_MAX_PER_CYCLE = int(os.environ.get("AUTO_PROMOTE_MAX_PER_CYCLE", "3"))
+
 # Routing profile: "cheap", "balanced", or "quality"
 ROUTING_PROFILE = os.environ.get("ROUTING_PROFILE", "balanced")
 
@@ -45,10 +49,11 @@ LABEL_AUTO_REFINED = "auto-refined"
 LABEL_REFINED_OUT = "refined-out"  # closed originals that spawned a refined version
 LABEL_DRAFT = "draft"
 LABEL_READY = "ready"  # refined and ready for implementation
+LABEL_HOLD = "hold"    # pause auto-promotion
 
 # Safety: labels we NEVER process through the refine pipeline
 LABEL_IMPLEMENTING = "foreman-implementing"
-FORBIDDEN_LABELS = {LABEL_AUTO_REFINED, LABEL_REFINED_OUT, LABEL_DRAFT, LABEL_READY, LABEL_IMPLEMENTING}
+FORBIDDEN_LABELS = {LABEL_AUTO_REFINED, LABEL_REFINED_OUT, LABEL_DRAFT, LABEL_READY, LABEL_IMPLEMENTING, LABEL_HOLD}
 
 # ─── Logging ──────────────────────────────────────────────────
 
@@ -102,6 +107,7 @@ class GitHubClient:
                 LABEL_REFINED_OUT: "e4e669",       # muted yellow — closed originals
                 LABEL_DRAFT: "c5def5",              # light blue
                 LABEL_READY: "0075ca",              # blue — ready for implementation
+                LABEL_HOLD: "d93f0b",               # orange
             }
             for name, color in label_configs.items():
                 if name not in existing:
@@ -131,6 +137,19 @@ class GitHubClient:
         except Exception as e:
             log.error(f"Error fetching refinement queue: {e}")
             raise
+
+    def get_auto_refined_issues(self) -> list:
+        """Get open issues labeled 'auto-refined'."""
+        try:
+            return list(self.repo.get_issues(
+                state="open",
+                labels=[self.repo.get_label(LABEL_AUTO_REFINED)],
+                sort="created",
+                direction="asc",
+            ))
+        except Exception as e:
+            log.error(f"Error fetching auto-refined issues: {e}")
+            return []
 
     def get_all_open_issues(self) -> list:
         """Get all open issues for context (brainstorm dedup)."""
@@ -282,7 +301,7 @@ class ForemanAgent:
         self.vision = load_vision()
         self.dry_run = dry_run
         self.once = once
-        self.stats = {"refined": 0, "brainstormed": 0, "skipped": 0, "failed": 0}
+        self.stats = {"refined": 0, "brainstormed": 0, "skipped": 0, "failed": 0, "promoted": 0}
 
         log.info(f"\n{self.router.summary()}\n")
 
@@ -299,6 +318,66 @@ class ForemanAgent:
         self.cost.record(model, _Usage(response.input_tokens, response.output_tokens),
                          agent="seed", action=task)
         return response
+
+    def auto_promote_refined_issues(self) -> int:
+        """Find 'auto-refined' issues older than threshold and promote to 'ready'."""
+        log.info("⏫ Checking for issues to auto-promote...")
+        promoted_count = 0
+        
+        try:
+            issues = self.github.get_auto_refined_issues()
+            now = datetime.now(timezone.utc)
+            
+            for issue in issues:
+                if promoted_count >= AUTO_PROMOTE_MAX_PER_CYCLE:
+                    log.info(f"  Reached max auto-promotions per cycle ({AUTO_PROMOTE_MAX_PER_CYCLE})")
+                    break
+                    
+                labels = {l.name for l in issue.labels}
+                if LABEL_HOLD in labels:
+                    log.info(f"  ⏩ Skipping #{issue.number} — has 'hold' label")
+                    continue
+                
+                # Check age
+                created_at = issue.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                
+                age_hours = (now - created_at).total_seconds() / 3600
+                
+                if age_hours < AUTO_PROMOTE_DELAY_HOURS:
+                    log.info(f"  ⏳ Skipping #{issue.number} — only {age_hours:.1f}h old (threshold {AUTO_PROMOTE_DELAY_HOURS}h)")
+                    continue
+                
+                log.info(f"  ⏫ Promoting #{issue.number} to ready ({age_hours:.1f}h old)")
+                
+                if self.dry_run:
+                    log.info(f"  [DRY RUN] Would promote #{issue.number} and send notification")
+                else:
+                    try:
+                        # Relabel
+                        issue.remove_from_labels(LABEL_AUTO_REFINED)
+                        issue.add_to_labels(LABEL_READY)
+                        
+                        # Comment
+                        issue.create_comment(
+                            f"⏫ Auto-promoted to `ready` after {AUTO_PROMOTE_DELAY_HOURS}h delay.\n\n"
+                            f"Implementation agent will pick this up soon. Add `{LABEL_HOLD}` label to pause."
+                        )
+                        
+                        # Notify
+                        tg(f"⏫ Auto-promoted #{issue.number} to <b>ready</b>: {issue.title}")
+                    except Exception as e:
+                        log.error(f"  ❌ Failed to promote #{issue.number}: {e}")
+                        continue
+                
+                promoted_count += 1
+                self.stats["promoted"] += 1
+
+        except Exception as e:
+            log.error(f"Error during auto-promotion: {e}")
+            
+        return promoted_count
 
     def refine_issue(self, issue) -> bool:
         """Refine a single issue. Returns True on success."""
@@ -443,6 +522,9 @@ class ForemanAgent:
                 log.warning("💤 Parked — cost ceiling reached")
                 tg(f"🚨 FOREMAN parked — cost ceiling ${COST_CEILING_USD:.2f} reached")
                 return self.stats
+
+            # Auto-promote eligible issues
+            self.auto_promote_refined_issues()
 
             # Check refinement queue
             queue = self.github.get_refinement_queue()
