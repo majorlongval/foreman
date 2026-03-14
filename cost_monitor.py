@@ -59,11 +59,14 @@ class CostTracker:
         """Record an API call's cost. Returns the cost of this call."""
         input_tokens = usage.input_tokens
         output_tokens = usage.output_tokens
+        
         cost = estimate_cost(model, input_tokens, output_tokens)
+        
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
         self.total_cost += cost
         self.calls += 1
+        
         self.records.append(CostRecord(
             timestamp=datetime.now(timezone.utc).isoformat(),
             agent=agent,
