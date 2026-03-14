@@ -216,7 +216,7 @@ ROUTING_PROFILES = {
         "brainstorm": "gemini/gemini-3-flash-preview",
         "review": "gemini/gemini-3.1-pro-preview",
         "review_confirm": "gemini/gemini-3.1-pro-preview",
-        "fix": "gemini/gemini-3.1-flash-lite-preview",
+        "fix": "gemini/gemini-3-flash-preview",
         "title_gen": "gemini/gemini-3.1-flash-lite-preview",
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "gemini/gemini-3-flash-preview",
