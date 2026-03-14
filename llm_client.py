@@ -150,14 +150,15 @@ class LLMClient:
             log.info(f"  🤖 {model}" + (f" (max {max_tokens} tokens)" if max_tokens else ""))
             
             response = litellm.completion(**kwargs)
-
+            if not getattr(response, "choices", None):
+                raise ValueError(f"LLM API returned no choices (possibly blocked). Raw response: {response}")
             text = response.choices[0].message.content or ""
-            input_tokens = response.usage.prompt_tokens or 0
-            output_tokens = response.usage.completion_tokens or 0
+            
+            usage = getattr(response, "usage", None)
+            input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+            output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
             cost = estimate_cost(model, input_tokens, output_tokens)
-
             log.info(f"  ✓ {input_tokens} in / {output_tokens} out = ${cost:.4f}")
-
             return LLMResponse(
                 text=text,
                 model=model_name,
@@ -193,7 +194,7 @@ class LLMClient:
 
             log.info(f"  🧬 Generating embedding with {model}")
             response = litellm.embedding(**kwargs)
-            return response.data[0]['embedding']
+            return response.data[0].embedding
         except Exception as e:
             log.error(f"  Embedding generation failed: {e}")
             raise
