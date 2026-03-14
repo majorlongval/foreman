@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '15 * * * *'  # Every hour at :15
   workflow_dispatch:       # Manual trigger from GitHub UI
+    inputs:
+      brainstorm_only:
+        description: 'Force brainstorm mode'
+        required: false
+        default: 'false'
+        type: boolean
   issues:
     types: [labeled]      # Trigger when any issue is labeled
 
@@ -29,7 +35,12 @@ jobs:
         run: pip install --quiet anthropic PyGithub google-genai
 
       - name: Run Seed Agent
-        run: python seed_agent.py --once
+        run: |
+          if [ "${{ github.event.inputs.brainstorm_only }}" = "true" ]; then
+            python seed_agent.py --brainstorm-only
+          else
+            python seed_agent.py --once
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
