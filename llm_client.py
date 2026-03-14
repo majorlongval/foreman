@@ -93,12 +93,17 @@ PRICING = {
 def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> float:
     """Estimate cost in USD for a completion."""
     pricing = PRICING.get(model_key)
+    
+    # Fallback to check without provider prefix
+    if not pricing and "/" in model_key:
+        pricing = PRICING.get(model_key.split("/", 1)[1])
+        
     if not pricing:
         provider = model_key.split("/")[0]
         if provider in ("ollama", "lmstudio", "local"):
             return 0.0
-        log.warning(f"  Missing pricing for {model_key}, cost estimate will be $0.00")
-        return 0.0
+        # Default to most expensive if unknown to be safe
+        pricing = {"input": 15.0, "output": 75.0}
     return (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
 
 
@@ -192,6 +197,8 @@ class LLMClient:
 
             log.info(f"  🧬 Generating embedding with {model}")
             response = litellm.embedding(**kwargs)
+            if not getattr(response, "data", None):
+                raise ValueError(f"LLM API returned no embedding data (possibly blocked). Raw response: {response}")
             return response.data[0].embedding
         except Exception as e:
             log.error(f"  Embedding generation failed: {e}")
