@@ -48,6 +48,7 @@ jobs:
           ROUTING_PROFILE: cheap
           FIX_COST_CEILING_USD: "1.0"
           MAX_FIX_CYCLES: "5"
+          AUTO_MERGE_ENABLED: "false"
 
       - name: Run Fix Agent (manual trigger)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number != ''
@@ -61,6 +62,7 @@ jobs:
           ROUTING_PROFILE: cheap
           FIX_COST_CEILING_USD: "1.0"
           MAX_FIX_CYCLES: "5"
+          AUTO_MERGE_ENABLED: "false"
 
       - name: Run Fix Agent (manual - all PRs)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.pr_number == ''
@@ -74,4 +76,4 @@ jobs:
           ROUTING_PROFILE: cheap
           FIX_COST_CEILING_USD: "1.0"
           MAX_FIX_CYCLES: "5"
-
+          AUTO_MERGE_ENABLED: "false"
