@@ -10,6 +10,7 @@ Usage:
   python fix_agent.py --pr 42          # Fix issues on a specific PR
   python fix_agent.py --once           # Check all PRs for fixable reviews
   python fix_agent.py --dry-run        # Generate fixes without pushing
+  python fix_agent.py --cost-summary   # Show daily API cost summary
 """
 
 import ast
@@ -25,7 +26,7 @@ from datetime import datetime, timezone
 
 from github import Github
 from llm_client import LLMClient, ModelRouter
-from cost_monitor import CostTracker
+from cost_monitor import CostTracker, print_daily_summary
 from telegram_notifier import notify as tg
 
 # ─── Configuration ────────────────────────────────────────────
@@ -474,7 +475,16 @@ def main():
     parser.add_argument("--pr", type=int, default=None, help="Fix a specific PR")
     parser.add_argument("--once", action="store_true", help="Single pass then exit")
     parser.add_argument("--dry-run", action="store_true", help="Generate fixes without pushing")
+    parser.add_argument("--cost-summary", action="store_true", help="Show daily API cost summary")
     args = parser.parse_args()
+
+    if args.cost_summary:
+        try:
+            print_daily_summary()
+            sys.exit(0)
+        except Exception as e:
+            log.error(f"Failed to display cost summary: {e}")
+            sys.exit(1)
 
     for var in ["GITHUB_TOKEN", "FOREMAN_REPO"]:
         if not os.environ.get(var):
@@ -488,7 +498,7 @@ def main():
     elif args.once:
         agent.run_once()
     else:
-        log.error("Fix agent runs on-demand only. Use --pr N or --once")
+        log.error("Fix agent runs on-demand only. Use --pr N, --once, or --cost-summary")
         sys.exit(1)
 
 

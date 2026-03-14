@@ -8,6 +8,7 @@ Usage:
   python review_agent.py                # Run the loop
   python review_agent.py --once         # Single pass then exit
   python review_agent.py --dry-run      # Log without posting comments
+  python review_agent.py --cost-summary # Display daily API cost summary
 """
 import os
 import sys
@@ -352,7 +353,16 @@ def main():
     parser = argparse.ArgumentParser(description="FOREMAN PR Reviewer")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--cost-summary", action="store_true", help="Display daily API cost summary")
     args = parser.parse_args()
+    # Handle cost summary request
+    if args.cost_summary:
+        try:
+            from cost_monitor import print_daily_summary
+            print_daily_summary()
+        except Exception as e:
+            log.error(f"Error printing cost summary: {e}")
+        sys.exit(0)
     for var in ["GITHUB_TOKEN", "FOREMAN_REPO"]:
         if not os.environ.get(var):
             log.error(f"❌ {var} not set")

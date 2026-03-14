@@ -8,6 +8,7 @@ defined in brain_tools.py.
 Usage:
   python foreman_brain.py                    # Run the bot
   python foreman_brain.py --repo owner/repo  # Override default repo
+  python foreman_brain.py --cost-summary     # Show daily API cost summary
 """
 
 import os
@@ -22,7 +23,7 @@ import anthropic
 from github import Github
 
 from brain_tools import TOOL_SCHEMAS, execute_tool, get_project_status
-from cost_monitor import CostTracker
+from cost_monitor import CostTracker, print_daily_summary
 
 # ─── Configuration ────────────────────────────────────────────
 
@@ -423,7 +424,17 @@ def _split_message(text: str, limit: int = 4096) -> list[str]:
 def main():
     parser = argparse.ArgumentParser(description="FOREMAN Brain — Telegram bot")
     parser.add_argument("--repo", default=None, help="Override default repo (owner/repo)")
+    parser.add_argument("--cost-summary", action="store_true", help="Show daily API cost summary and exit")
     args = parser.parse_args()
+
+    if args.cost_summary:
+        log.info("Requested daily cost summary")
+        try:
+            print_daily_summary()
+            sys.exit(0)
+        except Exception as e:
+            log.error(f"Failed to display cost summary: {e}")
+            sys.exit(1)
 
     if args.repo:
         global DEFAULT_REPO

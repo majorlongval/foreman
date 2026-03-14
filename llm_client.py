@@ -48,12 +48,8 @@ litellm.drop_params = True # Silently drop unsupported params like thinking_conf
 class LLMResponse:
     """Unified response from any LLM provider."""
     text: str
-    model: str
-    provider: str
     input_tokens: int
     output_tokens: int
-    cost_usd: float  # estimated based on known pricing
-    raw: object = None  # original provider response for debugging
 
 
 # ─── Pricing ─────────────────────────────────────────────────
@@ -124,7 +120,7 @@ class LLMClient:
         self._ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         # Map existing env vars to litellm expected names if needed
         if os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
-            os.environ["GOOGLE_API_KEY"] = os.environ.get("GEMINI_API_KEY")
+            os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
 
     def complete(
         self,
@@ -167,12 +163,8 @@ class LLMClient:
             log.info(f"  ✓ {input_tokens} in / {output_tokens} out = ${cost:.4f}")
             return LLMResponse(
                 text=text,
-                model=model_name,
-                provider=provider,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-                cost_usd=cost,
-                raw=response,
             )
         except Exception as e:
             log.error(f"  LLM complete call failed: {e}")
@@ -182,26 +174,24 @@ class LLMClient:
         """Generate a text embedding using LiteLLM."""
         try:
             if not model:
-                if os.environ.get("OPENAI_API_KEY"):
-                    model = "openai/text-embedding-3-small"
-                elif os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
-                    model = "gemini/text-embedding-004"
-                else:
-                    raise ValueError("No default embedding model found (neither OPENAI_API_KEY nor GEMINI_API_KEY set)")
-
-            if "/" not in model:
-                raise ValueError(f"Model must be in 'provider/model' format, got: '{model}'")
-
-            provider, _ = model.split("/", 1)
-            kwargs = {"model": model, "input": [text]}
+                model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
             
-            if provider == "ollama":
+            kwargs = {
+                "model": model,
+                "input": [text]
+            }
+            
+            if model.startswith("ollama/"):
                 kwargs["api_base"] = self._ollama_base
-
-            log.info(f"  🧬 Generating embedding with {model}")
             response = litellm.embedding(**kwargs)
             if not getattr(response, "data", None):
                 raise ValueError(f"LLM API returned no embedding data (possibly blocked). Raw response: {response}")
+            
+            usage = getattr(response, "usage", None)
+            input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+            cost = estimate_cost(model, input_tokens, 0)
+            
+            log.info(f"  ✓ embedding {input_tokens} tokens = ${cost:.4f}")
             return response.data[0].embedding
         except Exception as e:
             log.error(f"  Embedding generation failed: {e}")
