@@ -12,6 +12,7 @@ Usage:
   python fix_agent.py --dry-run        # Generate fixes without pushing
 """
 
+import ast
 import difflib
 import json
 import os
@@ -331,7 +332,7 @@ class FixAgent:
                     self.cost.record(model, response, agent="fixer", action="fix")
 
                     patches = parse_json(response.text)
-                    if not patches:
+                    if patches is None:
                         log.warning(f"  Attempt {attempt+1}: invalid JSON response for {filepath}")
                         prompt += "\n\nYour previous response was not valid JSON. Output ONLY a JSON array."
                         continue
@@ -347,7 +348,6 @@ class FixAgent:
                         log.warning(f"  Scope warnings for {filepath}: {warnings}")
 
                     if filepath.endswith(".py"):
-                        import ast
                         try:
                             ast.parse(patched_content)
                         except SyntaxError as e:
@@ -387,9 +387,9 @@ class FixAgent:
                         branch=branch,
                     )
                     log.info(f"  Pushed fix for {filepath}")
+                    fixes_applied.append(filepath)
                 else:
                     log.info(f"  [DRY RUN] Would push fix for {filepath}")
-                fixes_applied.append(filepath)
 
             # Post summary comment
             if fixes_applied:
