@@ -94,88 +94,110 @@ class GitHubClient:
 
     def _ensure_labels(self):
         """Create our labels if they don't exist."""
-        existing = {l.name for l in self.repo.get_labels()}
-        label_configs = {
-            LABEL_NEEDS_REFINEMENT: "fbca04",  # yellow
-            LABEL_AUTO_REFINED: "0e8a16",      # green
-            LABEL_REFINED_OUT: "e4e669",       # muted yellow — closed originals
-            LABEL_DRAFT: "c5def5",              # light blue
-            LABEL_READY: "0075ca",              # blue — ready for implementation
-        }
-        for name, color in label_configs.items():
-            if name not in existing:
-                if not self.dry_run:
-                    self.repo.create_label(name=name, color=color)
-                log.info(f"  Created label: {name}")
+        try:
+            existing = {l.name for l in self.repo.get_labels()}
+            label_configs = {
+                LABEL_NEEDS_REFINEMENT: "fbca04",  # yellow
+                LABEL_AUTO_REFINED: "0e8a16",      # green
+                LABEL_REFINED_OUT: "e4e669",       # muted yellow — closed originals
+                LABEL_DRAFT: "c5def5",              # light blue
+                LABEL_READY: "0075ca",              # blue — ready for implementation
+            }
+            for name, color in label_configs.items():
+                if name not in existing:
+                    if not self.dry_run:
+                        self.repo.create_label(name=name, color=color)
+                    log.info(f"  Created label: {name}")
+        except Exception as e:
+            log.error(f"Error ensuring labels: {e}")
 
     def get_refinement_queue(self) -> list:
         """Get open issues labeled 'needs-refinement', excluding forbidden labels."""
-        issues = self.repo.get_issues(
-            state="open",
-            labels=[self.repo.get_label(LABEL_NEEDS_REFINEMENT)],
-            sort="created",
-            direction="asc",
-        )
-        safe_issues = []
-        for issue in issues:
-            issue_labels = {l.name for l in issue.labels}
-            if issue_labels & FORBIDDEN_LABELS:
-                log.warning(f"  ⛔ Skipping #{issue.number} — has forbidden label: {issue_labels & FORBIDDEN_LABELS}")
-                continue
-            safe_issues.append(issue)
-        return safe_issues
+        try:
+            issues = self.repo.get_issues(
+                state="open",
+                labels=[self.repo.get_label(LABEL_NEEDS_REFINEMENT)],
+                sort="created",
+                direction="asc",
+            )
+            safe_issues = []
+            for issue in issues:
+                issue_labels = {l.name for l in issue.labels}
+                if issue_labels & FORBIDDEN_LABELS:
+                    log.warning(f"  ⛔ Skipping #{issue.number} — has forbidden label: {issue_labels & FORBIDDEN_LABELS}")
+                    continue
+                safe_issues.append(issue)
+            return safe_issues
+        except Exception as e:
+            log.error(f"Error fetching refinement queue: {e}")
+            return []
 
     def get_all_open_issues(self) -> list:
         """Get all open issues for context (brainstorm dedup)."""
-        return list(self.repo.get_issues(state="open"))
+        try:
+            return list(self.repo.get_issues(state="open"))
+        except Exception as e:
+            log.error(f"Error fetching open issues: {e}")
+            return []
 
     def get_closed_issues(self, count: int = 50) -> list:
         """Get recently closed issues for context."""
-        return list(self.repo.get_issues(state="closed", sort="updated", direction="desc")[:count])
+        try:
+            return list(self.repo.get_issues(state="closed", sort="updated", direction="desc")[:count])
+        except Exception as e:
+            log.error(f"Error fetching closed issues: {e}")
+            return []
 
     def create_refined_issue(self, original_issue, refined_body: str, refined_title: str) -> int:
         """Create a new refined issue and close the original with a link."""
-        if self.dry_run:
-            log.info(f"  [DRY RUN] Would create refined issue from #{original_issue.number}")
-            log.info(f"  [DRY RUN] Title: {refined_title}")
+        try:
+            if self.dry_run:
+                log.info(f"  [DRY RUN] Would create refined issue from #{original_issue.number}")
+                log.info(f"  [DRY RUN] Title: {refined_title}")
+                return -1
+
+            # Create new issue
+            new_issue = self.repo.create_issue(
+                title=refined_title,
+                body=refined_body + f"\n\n---\n_Auto-refined from #{original_issue.number}_",
+                labels=[self.repo.get_label(LABEL_AUTO_REFINED)],
+            )
+
+            # Close original with cross-reference
+            original_issue.add_to_labels(self.repo.get_label(LABEL_REFINED_OUT))
+            original_issue.remove_from_labels(self.repo.get_label(LABEL_NEEDS_REFINEMENT))
+            original_issue.create_comment(
+                f"🤖 Refined by FOREMAN → #{new_issue.number}\n\n"
+                f"This issue has been closed because a structured version was created. "
+                f"The original content is preserved here for audit purposes."
+            )
+            original_issue.edit(state="closed", state_reason="completed")
+
+            log.info(f"  ✅ #{original_issue.number} → #{new_issue.number} (original closed)")
+            return new_issue.number
+        except Exception as e:
+            log.error(f"Error creating refined issue: {e}")
             return -1
 
-        # Create new issue
-        new_issue = self.repo.create_issue(
-            title=refined_title,
-            body=refined_body + f"\n\n---\n_Auto-refined from #{original_issue.number}_",
-            labels=[self.repo.get_label(LABEL_AUTO_REFINED)],
-        )
-
-        # Close original with cross-reference
-        original_issue.add_to_labels(self.repo.get_label(LABEL_REFINED_OUT))
-        original_issue.remove_from_labels(self.repo.get_label(LABEL_NEEDS_REFINEMENT))
-        original_issue.create_comment(
-            f"🤖 Refined by FOREMAN → #{new_issue.number}\n\n"
-            f"This issue has been closed because a structured version was created. "
-            f"The original content is preserved here for audit purposes."
-        )
-        original_issue.edit(state="closed", state_reason="completed")
-
-        log.info(f"  ✅ #{original_issue.number} → #{new_issue.number} (original closed)")
-        return new_issue.number
-
-    def create_draft_issues(self, drafts: list[dict]) -> list[int]:
-        """Create draft issues from brainstorm output."""
+    def create_draft_issues(self, drafts: list[dict]) -> list[tuple[int, str]]:
+        """Create draft issues from brainstorm output. Returns list of (number, title)."""
         created = []
         for draft in drafts:
-            if self.dry_run:
-                log.info(f"  [DRY RUN] Would create draft: {draft['title']}")
-                created.append(-1)
-                continue
+            try:
+                if self.dry_run:
+                    log.info(f"  [DRY RUN] Would create draft: {draft['title']}")
+                    created.append((-1, draft['title']))
+                    continue
 
-            issue = self.repo.create_issue(
-                title=draft["title"],
-                body=draft["body"] + "\n\n---\n_Auto-generated by FOREMAN brainstorm mode_",
-                labels=[self.repo.get_label(LABEL_DRAFT)],
-            )
-            log.info(f"  📝 Created draft #{issue.number}: {draft['title']}")
-            created.append(issue.number)
+                issue = self.repo.create_issue(
+                    title=draft["title"],
+                    body=draft["body"] + "\n\n---\n_Auto-generated by FOREMAN brainstorm mode_",
+                    labels=[self.repo.get_label(LABEL_DRAFT)],
+                )
+                log.info(f"  📝 Created draft #{issue.number}: {draft['title']}")
+                created.append((issue.number, draft["title"]))
+            except Exception as e:
+                log.error(f"Error creating draft issue '{draft.get('title')}': {e}")
         return created
 
 
@@ -251,13 +273,14 @@ Output ONLY valid JSON. No markdown fences. No preamble."""
 # ─── Agent Logic ─────────────────────────────────────────────
 
 class ForemanAgent:
-    def __init__(self, github: GitHubClient, dry_run: bool = False):
+    def __init__(self, github: GitHubClient, dry_run: bool = False, once: bool = False):
         self.github = github
         self.llm = LLMClient()
         self.router = ModelRouter(ROUTING_PROFILE)
         self.cost = CostTracker(ceiling_usd=COST_CEILING_USD)
         self.vision = load_vision()
         self.dry_run = dry_run
+        self.once = once
         self.stats = {"refined": 0, "brainstormed": 0, "skipped": 0, "failed": 0}
 
         log.info(f"\n{self.router.summary()}\n")
@@ -315,7 +338,7 @@ class ForemanAgent:
             self.stats["failed"] += 1
             return False
 
-    def brainstorm(self) -> list[int]:
+    def brainstorm(self) -> list[tuple[int, str]]:
         """Generate draft issues from VISION.md + current state."""
         log.info("🧠 Entering BRAINSTORM mode")
 
@@ -368,7 +391,24 @@ class ForemanAgent:
 
             created = self.github.create_draft_issues(drafts)
             self.stats["brainstormed"] += len(created)
-            tg(f"🧠 Brainstormed {len(created)} new draft issues")
+            
+            if created:
+                bullets = "\n".join([f"• #{n}: {t}" for n, t in created])
+                msg = (
+                    f"🧠 Brainstorm complete — created {len(created)} draft issue(s):\n"
+                    f"{bullets}\n\n"
+                    "Go review and label the ones you want → needs-refinement.\n"
+                    "Agent is paused. Send /resume when ready."
+                )
+                if not self.dry_run:
+                    tg(msg)
+                else:
+                    log.info(f"  [DRY RUN] Would send Telegram: {msg}")
+
+                if not self.once:
+                    log.info("  ⏸️ Pausing agent after brainstorm as requested by VISION.md contract.")
+                    state.set_state(AgentState.PAUSED)
+
             return created
 
         except json.JSONDecodeError as e:
@@ -386,36 +426,39 @@ class ForemanAgent:
         log.info("=" * 60)
         log.info(f"🔄 FOREMAN pass @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
 
-        if not self.cost.check_ceiling():
-            log.warning("💤 Parked — cost ceiling reached")
-            tg(f"🚨 FOREMAN parked — cost ceiling ${COST_CEILING_USD:.2f} reached")
-            return self.stats
+        try:
+            if not self.cost.check_ceiling():
+                log.warning("💤 Parked — cost ceiling reached")
+                tg(f"🚨 FOREMAN parked — cost ceiling ${COST_CEILING_USD:.2f} reached")
+                return self.stats
 
-        # Check refinement queue
-        queue = self.github.get_refinement_queue()
-        log.info(f"📋 Refinement queue: {len(queue)} issues")
+            # Check refinement queue
+            queue = self.github.get_refinement_queue()
+            log.info(f"📋 Refinement queue: {len(queue)} issues")
 
-        if queue and not force_brainstorm:
-            # REFINE MODE
-            for issue in queue:
-                self.refine_issue(issue)
-                if not self.cost.check_ceiling():
-                    break
-                time.sleep(2)  # Be nice to APIs
-        elif len(queue) < BRAINSTORM_THRESHOLD or force_brainstorm:
-            # BRAINSTORM MODE — check open draft cap first
-            open_issues = self.github.get_all_open_issues()
-            open_count = len(open_issues)
-            if not force_brainstorm and open_count >= MAX_OPEN_DRAFTS:
-                log.info(f"  💤 Skipping brainstorm — {open_count} open issues >= cap ({MAX_OPEN_DRAFTS})")
+            if queue and not force_brainstorm:
+                # REFINE MODE
+                for issue in queue:
+                    self.refine_issue(issue)
+                    if not self.cost.check_ceiling():
+                        break
+                    time.sleep(2)  # Be nice to APIs
+            elif len(queue) < BRAINSTORM_THRESHOLD or force_brainstorm:
+                # BRAINSTORM MODE — check open draft cap first
+                open_issues = self.github.get_all_open_issues()
+                open_count = len(open_issues)
+                if not force_brainstorm and open_count >= MAX_OPEN_DRAFTS:
+                    log.info(f"  💤 Skipping brainstorm — {open_count} open issues >= cap ({MAX_OPEN_DRAFTS})")
+                else:
+                    log.info(f"  Queue ({len(queue)}) below threshold ({BRAINSTORM_THRESHOLD}) — brainstorming")
+                    self.brainstorm()
             else:
-                log.info(f"  Queue ({len(queue)}) below threshold ({BRAINSTORM_THRESHOLD}) — brainstorming")
-                self.brainstorm()
-        else:
-            log.info("  Nothing to do, waiting...")
+                log.info("  Nothing to do, waiting...")
 
-        log.info(f"📊 Stats: {self.stats}")
-        log.info(f"💰 {self.cost.summary()}")
+            log.info(f"📊 Stats: {self.stats}")
+            log.info(f"💰 {self.cost.summary()}")
+        except Exception as e:
+            log.error(f"Error in run_once: {e}")
         return self.stats
 
     def run_loop(self):
@@ -433,17 +476,21 @@ class ForemanAgent:
 
         try:
             while True:
-                # Pause loop — wait until resumed or polling thread dies
-                while state.get_state() == AgentState.PAUSED:
-                    if not is_polling_alive():
-                        log.warning("Telegram polling thread died while paused. Auto-resuming.")
-                        state.set_state(AgentState.RUNNING)
-                        break
-                    time.sleep(15)
+                try:
+                    # Pause loop — wait until resumed or polling thread dies
+                    while state.get_state() == AgentState.PAUSED:
+                        if not is_polling_alive():
+                            log.warning("Telegram polling thread died while paused. Auto-resuming.")
+                            state.set_state(AgentState.RUNNING)
+                            break
+                        time.sleep(15)
 
-                self.run_once()
-                log.info(f"💤 Sleeping {POLL_INTERVAL_SEC}s...")
-                time.sleep(POLL_INTERVAL_SEC)
+                    self.run_once()
+                    log.info(f"💤 Sleeping {POLL_INTERVAL_SEC}s...")
+                    time.sleep(POLL_INTERVAL_SEC)
+                except Exception as e:
+                    log.error(f"Error in main loop iteration: {e}")
+                    time.sleep(POLL_INTERVAL_SEC)
         except KeyboardInterrupt:
             log.info("\n🛑 FOREMAN stopped by user")
             log.info(f"📊 Final stats: {self.stats}")
@@ -481,7 +528,7 @@ def main():
     # e.g. ROUTING_PROFILE=cheap with all-Gemini routing only needs GEMINI_API_KEY.
 
     github = GitHubClient(GITHUB_TOKEN, REPO_NAME, dry_run=args.dry_run)
-    agent = ForemanAgent(github, dry_run=args.dry_run)
+    agent = ForemanAgent(github, dry_run=args.dry_run, once=args.once)
 
     if args.once or args.brainstorm_only:
         agent.run_once(force_brainstorm=args.brainstorm_only)
