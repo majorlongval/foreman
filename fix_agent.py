@@ -206,7 +206,7 @@ class FixAgent:
         """Get all FOREMAN review bodies with issues, oldest first."""
         return [
             r.body for r in pr.get_reviews()
-            if r.body and BOT_SIGNATURE.strip() in r.body
+            if r.body and "Review by FOREMAN" in r.body
             and ("[CRITICAL]" in r.body.upper() or "[IMPORTANT]" in r.body.upper())
         ]
 
@@ -226,7 +226,7 @@ class FixAgent:
         """Count FOREMAN review cycles on this PR."""
         count = 0
         for review in pr.get_reviews():
-            if review.body and BOT_SIGNATURE.strip() in review.body:
+            if review.body and "Review by FOREMAN" in review.body:
                 count += 1
         return count
 
@@ -274,13 +274,7 @@ class FixAgent:
                 log.warning(f"  Failed to update PR data: {e}")
 
         if pr.mergeable is False:
-            log.warning(f"  PR #{pr.number} is not mergeable (conflicts)")
-            if not self.dry_run:
-                try:
-                    pr.add_to_labels(LABEL_NEEDS_HUMAN)
-                except Exception:
-                    pass
-            return False
+            raise ValueError("PR is not mergeable (conflicts)")
         
         # We need it to be explicitly True. None means calculating.
         if pr.mergeable is not True:
@@ -290,7 +284,7 @@ class FixAgent:
         cycles = self._count_fix_cycles(pr)
         if cycles > MAX_FIX_CYCLES:
             log.warning(f"  Fix cycle count ({cycles}) exceeds MAX_FIX_CYCLES ({MAX_FIX_CYCLES})")
-            return False
+            raise Exception(f"Fix cycle count ({cycles}) exceeds MAX_FIX_CYCLES ({MAX_FIX_CYCLES})")
 
         latest_review = self._get_latest_foreman_review(pr)
         if not latest_review:
@@ -302,7 +296,7 @@ class FixAgent:
         # Ensure no remaining critical issues in the latest review body
         if "[CRITICAL]" in latest_review.upper() or "[IMPORTANT]" in latest_review.upper():
             log.warning(f"  PR #{pr.number} has APPROVE verdict but still lists critical issues")
-            return False
+            raise Exception("PR has APPROVE verdict but still lists critical/important issues")
 
         return True
 
