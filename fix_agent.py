@@ -215,7 +215,7 @@ class FixAgent:
         try:
             reviews = [
                 r.body for r in pr.get_reviews()
-                if r.body and BOT_SIGNATURE.strip() in r.body
+                if r.body and "Review by FOREMAN" in r.body
             ]
             return reviews[-1] if reviews else None
         except Exception as e:
@@ -275,6 +275,11 @@ class FixAgent:
 
         if pr.mergeable is False:
             log.warning(f"  PR #{pr.number} is not mergeable (conflicts)")
+            if not self.dry_run:
+                try:
+                    pr.add_to_labels(LABEL_NEEDS_HUMAN)
+                except Exception:
+                    pass
             return False
         
         # We need it to be explicitly True. None means calculating.
@@ -325,7 +330,7 @@ class FixAgent:
             log.error(f"  Auto-merge failed for PR #{pr.number}: {e}")
             try:
                 if not self.dry_run:
-                    pr.add_to_labels(self.repo.get_label(LABEL_NEEDS_HUMAN))
+                    pr.add_to_labels(LABEL_NEEDS_HUMAN)
             except Exception:
                 pass
             tg(f"❌ Auto-merge failed for PR #{pr.number}: {e}\n{pr.html_url}")
@@ -336,11 +341,18 @@ class FixAgent:
 
         # Check for auto-merge first
         latest_review = self._get_latest_foreman_review(pr)
-        if latest_review and '"verdict": "APPROVE"' in latest_review:
-            log.info(f"  Latest review is APPROVE — checking auto-merge")
-            self._try_auto_merge(pr)
-            self.stats["skipped"] += 1
-            return True
+        if latest_review:
+            if '"verdict": "APPROVE"' in latest_review:
+                log.info(f"  Latest review is APPROVE — checking auto-merge")
+                self._try_auto_merge(pr)
+                self.stats["skipped"] += 1
+                return True
+            
+            # Prevent infinite waste loop: skip if the latest review has no actionable issues
+            if "[CRITICAL]" not in latest_review.upper() and "[IMPORTANT]" not in latest_review.upper():
+                log.info(f"  Latest review has no actionable issues — skipping")
+                self.stats["skipped"] += 1
+                return True
 
         # Check cycle count
         cycles = self._count_fix_cycles(pr)
