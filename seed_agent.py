@@ -197,7 +197,8 @@ class GitHubClient:
                 log.info(f"  📝 Created draft #{issue.number}: {draft['title']}")
                 created.append((issue.number, draft["title"]))
             except Exception as e:
-                log.error(f"Error creating draft issue '{draft.get('title')}': {e}")
+                title = draft.get("title", "Unknown") if isinstance(draft, dict) else str(draft)
+                log.error(f"Error creating draft issue '{title}': {e}")
         return created
 
 
@@ -389,6 +390,10 @@ class ForemanAgent:
             for d in drafts:
                 log.info(f"  💡 {d['title']} — {d.get('reasoning', 'no reason given')}")
 
+            if not self.once:
+                log.info("  ⏸️ Pausing agent after brainstorm as requested by VISION.md contract.")
+                state.set_state(AgentState.PAUSED)
+
             created = self.github.create_draft_issues(drafts)
             self.stats["brainstormed"] += len(created)
             
@@ -400,14 +405,16 @@ class ForemanAgent:
                     "Go review and label the ones you want → needs-refinement.\n"
                     "Agent is paused. Send /resume when ready."
                 )
+            else:
+                msg = "🧠 Brainstorm complete, but no drafts were created. Agent is paused."
+            
+            try:
                 if not self.dry_run:
                     tg(msg)
                 else:
                     log.info(f"  [DRY RUN] Would send Telegram: {msg}")
-
-                if not self.once:
-                    log.info("  ⏸️ Pausing agent after brainstorm as requested by VISION.md contract.")
-                    state.set_state(AgentState.PAUSED)
+            except Exception as e:
+                log.error(f"Failed to send Telegram notification: {e}")
 
             return created
 
