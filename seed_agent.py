@@ -130,7 +130,7 @@ class GitHubClient:
             return safe_issues
         except Exception as e:
             log.error(f"Error fetching refinement queue: {e}")
-            return []
+            raise
 
     def get_all_open_issues(self) -> list:
         """Get all open issues for context (brainstorm dedup)."""
@@ -138,7 +138,7 @@ class GitHubClient:
             return list(self.repo.get_issues(state="open"))
         except Exception as e:
             log.error(f"Error fetching open issues: {e}")
-            return []
+            raise
 
     def get_closed_issues(self, count: int = 50) -> list:
         """Get recently closed issues for context."""
@@ -392,7 +392,6 @@ class ForemanAgent:
                     log.info(f"  💡 {d.get('title', 'Unknown')} — {d.get('reasoning', 'no reason given')}")
                 else:
                     log.info(f"  💡 {d}")
-
             if not self.once:
                 log.info("  ⏸️ Pausing agent after brainstorm as requested by VISION.md contract.")
                 state.set_state(AgentState.PAUSED)
@@ -472,6 +471,9 @@ class ForemanAgent:
             log.info(f"💰 {self.cost.summary()}")
         except Exception as e:
             log.error(f"Error in run_once: {e}")
+            if not getattr(self, "once", False):
+                log.warning("  ⏸️ Pausing agent on unexpected error to prevent infinite retry loop.")
+                state.set_state(AgentState.PAUSED)
         return self.stats
 
     def run_loop(self):
@@ -503,6 +505,8 @@ class ForemanAgent:
                     time.sleep(POLL_INTERVAL_SEC)
                 except Exception as e:
                     log.error(f"Error in main loop iteration: {e}")
+                    log.warning("  ⏸️ Pausing agent on unexpected loop error to prevent infinite retry loop.")
+                    state.set_state(AgentState.PAUSED)
                     time.sleep(POLL_INTERVAL_SEC)
         except KeyboardInterrupt:
             log.info("\n🛑 FOREMAN stopped by user")
