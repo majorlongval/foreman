@@ -12,6 +12,8 @@ Usage:
   python fix_agent.py --dry-run        # Generate fixes without pushing
 """
 
+import difflib
+import json
 import os
 import re
 import sys
@@ -66,6 +68,95 @@ Rules:
 - Output ONLY the complete patched file content. No markdown fences. No explanation.
   The raw file content starts at character 0.
 """
+
+
+# ─── Patch Helpers ───────────────────────────────────────────
+
+def parse_json(text: str) -> list | None:
+    """Strip markdown fences and parse JSON. Returns list or None."""
+    if not text or not text.strip():
+        return None
+    text = text.strip()
+    # Strip markdown fences
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # Remove opening fence (```json or ```)
+        lines = lines[1:]
+        # Remove closing fence
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        result = json.loads(text)
+        if not isinstance(result, list):
+            return None
+        return result
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def apply_patches(content: str, patches: list) -> tuple[str, list[str]]:
+    """Apply search/replace patches. Returns (patched_content, errors).
+
+    Each patch must have 'search' appearing exactly once in content.
+    Errors are 1-indexed human-readable strings suitable for LLM retry prompts.
+    """
+    errors = []
+    for i, patch in enumerate(patches, 1):
+        search = patch.get("search", "")
+        replace = patch.get("replace", "")
+        count = content.count(search)
+        if count == 0:
+            errors.append(f"Patch {i}: search string not found in file")
+            continue
+        if count > 1:
+            errors.append(f"Patch {i}: search string matches {count} locations (must be unique)")
+            continue
+        content = content.replace(search, replace, 1)
+    return content, errors
+
+
+def check_scope(original: str, patched: str, review_body: str) -> list[str]:
+    """Warn if patches touch lines not mentioned in the review.
+
+    Returns a list of warning strings. Warnings are informational only —
+    callers should log them but not retry or block on them.
+    Expected noise: the review format doesn't guarantee line ranges for all
+    issues, so some spurious warnings are normal.
+    """
+    # Extract mentioned line ranges from review body: `filename.py:10-20` or `filename.py:10`
+    mentioned_ranges = []
+    for match in re.finditer(r'`[^`]+\.\w+:(\d+)(?:-(\d+))?`', review_body):
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else start
+        mentioned_ranges.append((start, end))
+
+    if not mentioned_ranges:
+        return []  # No ranges to check against
+
+    # Find changed line numbers (1-indexed, in original numbering)
+    changed_lines = set()
+    orig_line = 0
+    for line in difflib.unified_diff(original.splitlines(), patched.splitlines(), lineterm=""):
+        if line.startswith("@@"):
+            m = re.search(r"@@ -(\d+)", line)
+            if m:
+                orig_line = int(m.group(1)) - 1
+        elif line.startswith("---") or line.startswith("+++"):
+            pass  # file header lines — don't advance the line counter
+        elif line.startswith("-"):
+            orig_line += 1
+            changed_lines.add(orig_line)
+        elif not line.startswith("+"):
+            orig_line += 1
+
+    warnings = []
+    for ln in sorted(changed_lines):
+        if not any(start <= ln <= end for start, end in mentioned_ranges):
+            warnings.append(
+                f"Line {ln} changed but not within any reviewed range {mentioned_ranges}"
+            )
+    return warnings
 
 
 # ─── Fix Agent ───────────────────────────────────────────────
