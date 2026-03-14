@@ -27,9 +27,11 @@ class HygieneAgent:
         self.protected_label = "protected"
         self.needs_human_label = "needs-human"
         self.duplicate_label = "duplicate"
+        self.audited_label = "hygiene-audited"
         
         self.confidence_threshold_close = 0.95
         self.confidence_threshold_flag = 0.75
+        self._cached_paths = None
 
     def run(self):
         """Orchestrate the hygiene process across all open issues."""
@@ -37,9 +39,9 @@ class HygieneAgent:
         stats = {"closed": 0, "flagged": 0, "duplicates": 0, "processed": 0}
         
         try:
-            # Get all open issues, processing older ones first
-            open_issues = list(self.repo.get_issues(state="open", sort="created", direction="asc"))
-            log.info(f"Found {len(open_issues)} open issues.")
+            # Get up to 50 open issues, processing older ones first to control API costs
+            open_issues = self.repo.get_issues(state="open", sort="created", direction="asc")[:50]
+            log.info(f"Found {len(open_issues)} open issues to process this run.")
             
             # Fetch recent merged PRs for reference check
             merged_prs = []
@@ -61,8 +63,8 @@ class HygieneAgent:
                         log.info(f"  Skipping protected issue #{issue.number}")
                         continue
                     
-                    # Skip if already flagged for human or as duplicate to avoid repetitive actions
-                    if self.needs_human_label in labels or self.duplicate_label in labels:
+                    # Skip if already flagged for human, as duplicate, or previously audited to avoid repetitive actions
+                    if self.needs_human_label in labels or self.duplicate_label in labels or self.audited_label in labels:
                         continue
 
                     stats["processed"] += 1
@@ -91,6 +93,13 @@ class HygieneAgent:
                     elif impl_check["confidence"] >= self.confidence_threshold_flag:
                         self._flag_needs_human(issue, f"Possible existing implementation detected (Confidence: {impl_check['confidence']:.2f}).\n\n<b>Explanation:</b> {impl_check['explanation']}")
                         stats["flagged"] += 1
+                    else:
+                        # Add audited label to prevent infinite LLM re-evaluation loops on stale issues
+                        if not self.dry_run:
+                            try:
+                                issue.add_to_labels(self.audited_label)
+                            except Exception as e:
+                                log.error(f"  Failed to add {self.audited_label} label to #{issue.number}: {e}")
 
                 except Exception as e:
                     log.error(f"  Error processing issue #{issue.number}: {e}")
@@ -142,8 +151,17 @@ class HygieneAgent:
         """Use LLM to compare issue description against relevant codebase files."""
         try:
             # 1. Fetch file list and select relevant files
-            tree = self.repo.get_git_tree(self.repo.default_branch, recursive=True).tree
-            paths = [item.path for item in tree if item.type == "blob" and not any(x in item.path for x in (".", "node_modules", "dist", "vendor"))]
+            if self._cached_paths is None:
+                tree = self.repo.get_git_tree(self.repo.default_branch, recursive=True).tree
+                self._cached_paths = [
+                    item.path for item in tree 
+                    if item.type == "blob" 
+                    and not any(x in item.path for x in ("node_modules", "dist", "vendor"))
+                    and not item.path.startswith(".") 
+                    and "/." not in item.path
+                ]
+            
+            paths = self._cached_paths
             
             # Heuristic: match keywords from issue title to file paths
             keywords = [k.lower() for k in re.findall(r'\w+', issue.title) if len(k) > 3]
