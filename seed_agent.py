@@ -388,7 +388,10 @@ class ForemanAgent:
 
             # Log reasoning (not included in issues)
             for d in drafts:
-                log.info(f"  💡 {d['title']} — {d.get('reasoning', 'no reason given')}")
+                if isinstance(d, dict):
+                    log.info(f"  💡 {d.get('title', 'Unknown')} — {d.get('reasoning', 'no reason given')}")
+                else:
+                    log.info(f"  💡 {d}")
 
             if not self.once:
                 log.info("  ⏸️ Pausing agent after brainstorm as requested by VISION.md contract.")
@@ -419,6 +422,9 @@ class ForemanAgent:
             return created
 
         except json.JSONDecodeError as e:
+            if not self.once:
+                log.warning("  ⏸️ Pausing agent on JSON decode failure to prevent infinite retry loop.")
+                state.set_state(AgentState.PAUSED)
             log.error(f"  ❌ Failed to parse brainstorm JSON: {e}")
             log.error(f"  Raw response: {raw[:500]}")
             self.stats["failed"] += 1
