@@ -50,10 +50,11 @@ LABEL_REFINED_OUT = "refined-out"  # closed originals that spawned a refined ver
 LABEL_DRAFT = "draft"
 LABEL_READY = "ready"  # refined and ready for implementation
 LABEL_HOLD = "hold"    # pause auto-promotion
+LABEL_REFINEMENT_FAILED = "refinement-failed"
 
 # Safety: labels we NEVER process through the refine pipeline
 LABEL_IMPLEMENTING = "foreman-implementing"
-FORBIDDEN_LABELS = {LABEL_AUTO_REFINED, LABEL_REFINED_OUT, LABEL_DRAFT, LABEL_READY, LABEL_IMPLEMENTING, LABEL_HOLD}
+FORBIDDEN_LABELS = {LABEL_AUTO_REFINED, LABEL_REFINED_OUT, LABEL_DRAFT, LABEL_READY, LABEL_IMPLEMENTING, LABEL_HOLD, LABEL_REFINEMENT_FAILED}
 
 # ─── Logging ──────────────────────────────────────────────────
 
@@ -108,6 +109,7 @@ class GitHubClient:
                 LABEL_DRAFT: "c5def5",              # light blue
                 LABEL_READY: "0075ca",              # blue — ready for implementation
                 LABEL_HOLD: "d93f0b",               # orange
+                LABEL_REFINEMENT_FAILED: "e11d21",  # bright red
             }
             for name, color in label_configs.items():
                 if name not in existing:
@@ -252,6 +254,19 @@ Break the work into concrete subtasks:
 - [ ] Subtask 2
 (minimum 2 subtasks)
 
+## Tests
+Provide concrete definition-of-done via pytest stubs.
+Include at least two `pytest` function stubs: one happy path and one edge/failure case.
+Use Given/When/Then comment structure inside the stubs.
+Tests must use mocks/fixtures for external boundaries (GitHub API, LLMs).
+
+Example:
+def test_happy_path_example(mocker):
+    # Given: ...
+    # When: ...
+    # Then: ...
+    pass
+
 ## Complexity Estimate
 - T-shirt size: XS / S / M / L / XL
 - Estimated API cost: low / medium / high
@@ -261,6 +276,7 @@ Rules:
 - If the original is vague, make reasonable assumptions and state them
 - Title should be imperative: "Add X", "Fix Y", "Implement Z"
 - Be concise. No filler. Every word earns its place.
+- EVERY refined issue MUST include the ## Tests section with at least two stubs.
 """
 
 BRAINSTORM_SYSTEM = """You are FOREMAN, an autonomous agent that generates new development tasks
@@ -398,6 +414,20 @@ class ForemanAgent:
                 return False
 
             refined_body = response.text
+
+            # Validation: Ensure ## Tests section and at least 2 pytest stubs
+            if "## tests" not in refined_body.lower() or refined_body.count("def test_") < 2:
+                log.warning(f"  ⚠️ Refinement of #{issue.number} failed validation: missing or insufficient ## Tests section")
+                try:
+                    if not self.dry_run:
+                        issue.create_comment("⚠️ **FOREMAN Auto-Refinement Failed**\nThe LLM failed to generate the required `## Tests` section with at least 2 pytest stubs. Human intervention required.")
+                        issue.add_to_labels(LABEL_REFINEMENT_FAILED)
+                    else:
+                        log.info(f"  [DRY RUN] Would comment and label #{issue.number} as {LABEL_REFINEMENT_FAILED}")
+                except Exception as e:
+                    log.warning(f"Could not comment or label issue #{issue.number}: {e}")
+                self.stats["failed"] += 1
+                return False
 
             # Extract a better title — route to title_gen (usually cheapest model)
             title_response = self._complete(
