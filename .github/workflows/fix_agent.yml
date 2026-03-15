@@ -16,10 +16,11 @@ concurrency:
 jobs:
   fix:
     runs-on: ubuntu-latest
-    # Only run for FOREMAN reviews (not human reviews)
+    # Only run for FOREMAN reviews that are marked as critical failures
     if: >
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.review.body, 'Review by FOREMAN')
+      (contains(github.event.review.body, 'Review by FOREMAN') &&
+       contains(github.event.review.body, '[CRITICAL]'))
 
     permissions:
       issues: write
