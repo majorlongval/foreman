@@ -35,6 +35,8 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("foreman.implement")
+# Suppress noisy internal logs
+logging.getLogger("litellm").setLevel(logging.WARNING)
 
 def get_coding_standards() -> str:
     """Reads STANDARDS.md from the repository root."""
@@ -89,7 +91,14 @@ Rules:
 - Include logging statements — this runs unattended, logs are the only visibility
 - Wrap everything in try/except — never let an unhandled exception crash a loop
 - Keep it simple and focused. No over-engineering.
-- If modifying an existing file, preserve all existing code and only add/change what's needed"""
+- If modifying an existing file, preserve all existing code and only add/change what's needed
+
+Before you commit:
+- PyGithub paginators: Do NOT wrap in list(). Iterate directly.
+- Optimization: NEVER call get_label() inside a loop. Use string-based filtering.
+- Env Vars: Use float() for all numeric environment variables unless they are strictly integer counts/limits.
+- Performance: Cache expensive GitHub API results (like get_git_tree) at the instance level.
+- PR Safety: Always check pr.mergeable_state == "clean" before calling pr.merge()."""
 
 # ─── GitHub Client ────────────────────────────────────────────
 class GitHubClient:
@@ -214,7 +223,8 @@ class ImplementAgent:
     def _complete(self, task: str, system: str, message: str, max_tokens: int = None):
         model = self.router.get(task)
         response = self.llm.complete(model, system, message, max_tokens)
-        self.cost.record(model, response, agent="implement", action=task)
+        cost = self.cost.record(model, response, agent="implement", action=task)
+        log.info(f"  💰 Cost: ${cost:.4f} | Model: {model}")
         return response
 
     def _parse_json(self, text: str, label: str) -> dict | None:
@@ -310,6 +320,8 @@ class ImplementAgent:
             branch = plan["branch"]
             files = plan["files"][:MAX_FILES_PER_ISSUE]
             log.info(f"  Plan: branch={branch}, {len(files)} files")
+            for f in files:
+                log.info(f"    - {f['path']} ({f['action']}): {f.get('description', '')}")
             self.github.ensure_branch(branch)
             for file_spec in files:
                 log.info(f"  Generating: {file_spec['path']} ({file_spec['action']})")

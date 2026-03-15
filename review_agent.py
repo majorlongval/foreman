@@ -18,6 +18,7 @@ import logging
 import argparse
 from datetime import datetime, timezone
 from github import Github, GithubException
+import litellm
 from llm_client import LLMClient, ModelRouter
 from cost_monitor import CostTracker
 from telegram_notifier import notify as tg
@@ -45,6 +46,10 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("foreman-reviewer")
+
+# Suppress internal LiteLLM logs
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
 
 def get_coding_standards() -> str:
     try:
@@ -360,7 +365,7 @@ class PRReviewer:
         try:
             labels = [label.name for label in pr.labels] if hasattr(pr, 'labels') else []
             if "skip-review" in labels:
-                log.info(f"  ℹ️ PR #{pr.number} has skip-review label. Skipping test check.")
+                log.info(f"  ⏭️ PR #{pr.number} has skip-review label. Skipping test check.")
                 return None
             exempt_extensions = {".yml", ".yaml", ".json", ".toml", ".md", ".txt"}
             exempt_files = {"requirements.txt", ".gitignore", "LICENSE", "Procfile"}
@@ -389,7 +394,7 @@ class PRReviewer:
                     has_test_changes = True
 
             if only_exempt:
-                log.info(f"  ℹ️ PR #{pr.number} only modifies configuration/documentation. Skipping test check.")
+                log.info(f"  ⏭️ PR #{pr.number} only modifies configuration/documentation. Skipping test check.")
                 return None
 
             issues = []
@@ -426,11 +431,13 @@ class PRReviewer:
         log.info(f"🔍 Reviewing PR #{pr.number}: {pr.title}")
         try:
             if self._already_reviewed_head(pr):
+                log.info(f"  ⏭️ Skipping PR #{pr.number}: Already reviewed head commit {pr.head.sha[:7]}.")
                 self.stats["skipped"] += 1
                 return True
             
             fix_cycles = self._count_fix_cycles(pr)
             if fix_cycles >= MAX_FIX_CYCLES:
+                log.info(f"  ⏭️ Skipping PR #{pr.number}: Max fix cycles ({MAX_FIX_CYCLES}) exhausted. Escalating to human.")
                 if not self.dry_run:
                     pr.add_to_labels(self.repo.get_label(LABEL_NEEDS_HUMAN))
                     pr.create_issue_comment(
@@ -448,7 +455,7 @@ class PRReviewer:
             # --- Pre-check: Test Presence (Issue #57) ---
             test_report = self._validate_test_presence(pr, files)
             if test_report:
-                log.info(f"  ⚠️ Test presence check failed for PR #{pr.number}")
+                log.info(f"  🛑 Quality check failed for PR #{pr.number}. Posting requirements.")
                 if not any(test_report in r for r in prior_reviews):
                     if not self.dry_run:
                         pr.create_review(body=test_report + BOT_SIGNATURE, event="COMMENT")
@@ -466,10 +473,16 @@ class PRReviewer:
 
             review_message = self._build_review_message(pr, diff, files, prior_reviews=prior_reviews)
 
+            # Pass 1
             model_pass1 = self.router.get("review")
             response1 = self.llm.complete(model_pass1, REVIEW_SYSTEM, review_message)
-            self.cost.record(model_pass1, response1, agent="review", action="review_pass1")
-            if not self.cost.check_ceiling(): return False
+            usage1 = self.cost.record(model_pass1, response1, agent="review", action="review_pass1")
+            cost1 = usage1.get("cost", 0) if usage1 and hasattr(usage1, 'get') else 0
+            log.info(f"  💰 Cost: ${cost1:.4f} ({model_pass1})")
+
+            if not self.cost.check_ceiling():
+                log.warning("  ⚠️ Cost ceiling reached after Pass 1.")
+                return False
 
             review_body_1 = response1.text
             if not review_body_1 or not review_body_1.strip():
@@ -478,16 +491,25 @@ class PRReviewer:
                 return False
 
             review_data_1 = self._parse_review_data(review_body_1)
+            log.info(f"  ⚖️ Pass 1 Verdict: {review_data_1['verdict']} (🔴{review_data_1['critical_count']} 🟡{review_data_1['important_count']} 💡{review_data_1['suggestion_count']})")
+            
             if review_data_1["critical_count"] > 0 or review_data_1["important_count"] > 0:
+                log.info(f"  📢 Issues found in Pass 1. Posting review.")
                 if not self.dry_run:
                     pr.create_review(body=review_body_1 + BOT_SIGNATURE, event="COMMENT")
                 self.stats["reviewed"] += 1
                 return True
 
+            # Pass 2
             model_pass2 = self.router.get("review_confirm")
             response2 = self.llm.complete(model_pass2, REVIEW_SYSTEM, review_message)
-            self.cost.record(model_pass2, response2, agent="review", action="review_pass2")
-            if not self.cost.check_ceiling(): return False
+            usage2 = self.cost.record(model_pass2, response2, agent="review", action="review_pass2")
+            cost2 = usage2.get("cost", 0) if usage2 and hasattr(usage2, 'get') else 0
+            log.info(f"  💰 Cost: ${cost2:.4f} ({model_pass2})")
+
+            if not self.cost.check_ceiling():
+                log.warning("  ⚠️ Cost ceiling reached after Pass 2.")
+                return False
 
             review_body_2 = response2.text
             if not review_body_2 or not review_body_2.strip():
@@ -496,7 +518,10 @@ class PRReviewer:
                 return False
 
             review_data_2 = self._parse_review_data(review_body_2)
+            log.info(f"  ⚖️ Pass 2 Verdict: {review_data_2['verdict']} (🔴{review_data_2['critical_count']} 🟡{review_data_2['important_count']} 💡{review_data_2['suggestion_count']})")
+            
             if review_data_2["critical_count"] > 0 or review_data_2["important_count"] > 0:
+                log.info(f"  📢 Issues found in Pass 2. Posting review.")
                 if not self.dry_run:
                     pr.create_review(body=review_body_2 + BOT_SIGNATURE, event="COMMENT")
                 self.stats["reviewed"] += 1
@@ -510,18 +535,21 @@ class PRReviewer:
             is_own_pr = pr.user.login == self.bot_login
             approve_event = "COMMENT" if is_own_pr else "APPROVE"
             if is_own_pr:
-                log.info(f"  ℹ️ PR #{pr.number} is authored by bot — posting COMMENT instead of APPROVE (GitHub restriction)")
-            
+                log.info(f"  💬 PR #{pr.number} is authored by bot — using COMMENT instead of APPROVE.")
+
+            log.info(f"  ✅ Posting {approve_event} for PR #{pr.number}")
             pr.create_review(body=review_body_2 + BOT_SIGNATURE, event=approve_event)
             pr.add_to_labels(self.repo.get_label(LABEL_REVIEWED))
             self.stats["reviewed"] += 1
 
             if self._should_auto_merge(pr, review_data_2):
+                log.info(f"  🚀 PR #{pr.number} is eligible for auto-merge. Attempting...")
                 if self._auto_merge(pr):
                     tg(f"✅ Auto-merged PR #{pr.number}: {pr.title}\n{pr.html_url}")
                 else:
                     tg(f"✅ PR #{pr.number} approved but auto-merge failed — merge manually\n{pr.html_url}")
             else:
+                log.info(f"  ℹ️ PR #{pr.number} approved but not eligible for auto-merge.")
                 tg(f"✅ PR #{pr.number} approved — ready to merge\n{pr.html_url}")
 
             return True
@@ -535,12 +563,19 @@ class PRReviewer:
         log.info(f"🔄 FOREMAN reviewer @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
         
         if not self.cost.check_ceiling():
+            log.warning("  ⚠️ Cost ceiling reached. Review cycle aborted.")
             return self.stats
 
         queue = self.get_review_queue()
+        if not queue:
+            log.info("  📭 No PRs in queue.")
         for pr in queue:
-            self.review_pr(pr)
+            try:
+                self.review_pr(pr)
+            except Exception as e:
+                log.error(f"  ❌ Error processing PR #{pr.number}: {e}")
             if not self.cost.check_ceiling():
+                log.warning("  ⚠️ Cost ceiling reached during review cycle.")
                 break
             time.sleep(5)
 
