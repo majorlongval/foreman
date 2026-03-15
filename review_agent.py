@@ -367,13 +367,14 @@ class PRReviewer:
             test_report = self._validate_test_presence(pr, files)
             if test_report:
                 log.info(f"  🛑 Quality check failed for PR #{pr.number}. Posting requirements.")
-                if not any(test_report in r for r in prior_reviews):
-                    if not self.dry_run:
-                        pr.create_review(body=test_report + BOT_SIGNATURE, event="COMMENT")
-                    else:
-                        log.info(f"  [DRY RUN] Would post automated test check: {test_report}")
+                # Idempotency is handled by _already_reviewed_head() at start of review_pr().
+                if not self.dry_run:
+                    is_own_pr = pr.user.login == self.bot_login
+                    # Use REQUEST_CHANGES to trigger fix-agent (Issue #89)
+                    event = "COMMENT" if is_own_pr else "REQUEST_CHANGES"
+                    pr.create_review(body=test_report + BOT_SIGNATURE, event=event)
                 else:
-                    log.info(f"  ℹ️ Test presence check already posted. Skipping duplicate comment.")
+                    log.info(f"  [DRY RUN] Would post automated test check (REQUEST_CHANGES): {test_report}")
                 self.stats["reviewed"] += 1
                 return True
             # --------------------------------------------
