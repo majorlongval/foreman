@@ -112,6 +112,12 @@ Rules:
 - ALWAYS include a concrete "Suggested fix" code block for every CRITICAL and IMPORTANT issue.
   The fixer is a dumb model that will apply your suggestions literally — be precise and complete.
 - The Review Data JSON block MUST be the last section and MUST be valid JSON.
+- BE EXHAUSTIVE. Find ALL critical and important issues in this single pass. The fix/review
+  loop costs real money — discovering new issues round by round is expensive. If prior reviews
+  exist, first verify each prior critical is resolved, then scan the full diff for any
+  remaining issues. Do not hold issues back for future rounds.
+- When prior reviews exist: explicitly state for each prior critical whether it is FIXED or
+  STILL PRESENT before listing any new issues.
 """
 # ─── GitHub PR Helpers ───────────────────────────────────────
 class PRReviewer:
@@ -242,7 +248,14 @@ class PRReviewer:
             formatted = "\n\n---\n".join(
                 f"**Round {i+1}:**\n{r}" for i, r in enumerate(prior_reviews)
             )
-            history = f"\n\n## Prior Review History\n{formatted}"
+            history = (
+                f"\n\n## Prior Review History\n{formatted}\n\n"
+                f"## Your Tasks This Round\n"
+                f"1. For each CRITICAL and IMPORTANT issue from prior rounds, explicitly state "
+                f"whether it is **FIXED** or **STILL PRESENT** in the current diff.\n"
+                f"2. Scan the entire diff for any remaining issues — be exhaustive. "
+                f"Do not discover new issues in future rounds."
+            )
         return (
             f"## PR #{pr.number}: {pr.title}\n\n"
             f"**Description:**\n{pr.body or '(no description)'}\n\n"

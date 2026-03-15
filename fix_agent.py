@@ -72,9 +72,13 @@ Rules:
 - Each search string MUST appear exactly once in the file.
 - Each search string MUST include enough surrounding context lines to be unique.
 - ONLY address CRITICAL and IMPORTANT issues from the review.
-- Do NOT add operations for things not mentioned in the review.
-- Do NOT "clean up" or "improve" anything beyond the review scope.
-- If a suggested fix is provided verbatim in the review, use it exactly.
+- Fix each issue COMPREHENSIVELY: if a review identifies a pattern (e.g., missing
+  label check, missing cache, missing guard clause), scan the ENTIRE file for all
+  instances of that pattern and fix every one — not just the cited line number.
+  Line numbers in reviews are hints pointing to one example, not the full scope.
+- If a suggested fix is provided verbatim in the review, use it as the template
+  and apply the same pattern everywhere it is needed in the file.
+- Do NOT "clean up" or "improve" anything beyond fixing the identified issues.
 """
 
 
@@ -203,6 +207,23 @@ class FixAgent:
             and ("[CRITICAL]" in r.body.upper() or "[IMPORTANT]" in r.body.upper())
         ]
 
+    def _criticals_overlap(self, body1: str, body2: str) -> bool:
+        """Return True if two reviews share most of the same CRITICAL issue descriptions.
+
+        Used to detect when the fix agent is spinning — applying patches but the
+        reviewer keeps flagging the same problems. Triggers escalation.
+        """
+        def extract_criticals(body):
+            return set(re.findall(r'\[CRITICAL\][^\n]*', body, re.IGNORECASE))
+
+        c1 = extract_criticals(body1)
+        c2 = extract_criticals(body2)
+        if not c1 or not c2:
+            return False
+        overlap = len(c1 & c2)
+        # Stalled if at least half of current criticals were already in previous round
+        return overlap >= max(1, len(c1) // 2)
+
     def _count_fix_cycles(self, pr) -> int:
         """Count FOREMAN review cycles on this PR."""
         count = 0
@@ -252,6 +273,24 @@ class FixAgent:
         all_reviews = self._get_all_foreman_reviews(pr)
         if not all_reviews:
             log.info(f"  No actionable FOREMAN review found — skipping")
+            self.stats["skipped"] += 1
+            return True
+
+        # Convergence check: if same criticals appear two rounds in a row, escalate
+        if len(all_reviews) >= 2 and self._criticals_overlap(all_reviews[-1], all_reviews[-2]):
+            log.warning(f"  Fix agent stalled — same criticals in rounds {len(all_reviews)-1} and {len(all_reviews)}")
+            if not self.dry_run:
+                try:
+                    pr.add_to_labels(self.repo.get_label(LABEL_NEEDS_HUMAN))
+                except Exception:
+                    pass
+                pr.create_issue_comment(
+                    f"⚠️ Fix agent stalled — the same critical issues were present in rounds "
+                    f"{len(all_reviews)-1} and {len(all_reviews)}. Patches are not converging. "
+                    f"Human intervention needed."
+                    + FIX_SIGNATURE
+                )
+                tg(f"⚠️ PR #{pr.number} stalled — fix agent not converging after {len(all_reviews)} rounds\n{pr.html_url}")
             self.stats["skipped"] += 1
             return True
 
