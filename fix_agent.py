@@ -110,13 +110,14 @@ def parse_json(text: str) -> list | None:
         return None
 
 
-def apply_patches(content: str, patches: list) -> tuple[str, list[str]]:
-    """Apply search/replace patches. Returns (patched_content, errors).
+def apply_patches(content: str, patches: list) -> tuple[str, list[str], int]:
+    """Apply search/replace patches. Returns (patched_content, errors, applied_count).
 
     Each patch must have 'search' appearing exactly once in content.
     Errors are 1-indexed human-readable strings suitable for LLM retry prompts.
     """
     errors = []
+    applied_count = 0
     for i, patch in enumerate(patches, 1):
         if "search" not in patch or "replace" not in patch:
             errors.append(f"Patch {i}: missing required 'search' or 'replace' key")
@@ -131,7 +132,8 @@ def apply_patches(content: str, patches: list) -> tuple[str, list[str]]:
             errors.append(f"Patch {i}: search string matches {count} locations (must be unique)")
             continue
         content = content.replace(search, replace, 1)
-    return content, errors
+        applied_count += 1
+    return content, errors, applied_count
 
 
 def check_scope(original: str, patched: str, review_body: str) -> list[str]:
@@ -189,7 +191,7 @@ class FixAgent:
         self.dry_run = dry_run
         self.stats = {"fixed": 0, "skipped": 0, "failed": 0}
         self._ensure_labels()
-        log.info(f"\n{self.router.summary()}\n")
+        log.info(f"\n🤖 Router Configuration:\n{self.router.summary()}\n")
 
     def _ensure_labels(self):
         existing = {l.name for l in self.repo.get_labels()}
@@ -204,7 +206,7 @@ class FixAgent:
                     try:
                         self.repo.create_label(name=name, color=color)
                     except Exception as e:
-                        log.warning(f"  Could not create label {name}: {e}")
+                        log.warning(f"  ⚠️ Could not create label {name}: {e}")
 
     def _get_all_foreman_reviews(self, pr) -> list[str]:
         """Get all FOREMAN review bodies with issues, oldest first."""
@@ -223,7 +225,7 @@ class FixAgent:
             ]
             return reviews[-1] if reviews else None
         except Exception as e:
-            log.warning(f"  Failed to fetch reviews for PR #{pr.number}: {e}")
+            log.warning(f"  ⚠️ Failed to fetch reviews for PR #{pr.number}: {e}")
             return None
     def _criticals_overlap(self, body1: str, body2: str) -> bool:
         """Return True if two reviews share most of the same CRITICAL issue descriptions.
@@ -283,7 +285,7 @@ class FixAgent:
 
         labels = {l.name for l in pr.labels}
         if LABEL_NO_AUTO_MERGE in labels:
-            log.info(f"  Auto-merge opted out via label for PR #{pr.number}")
+            log.info(f"  ⏭️ Auto-merge opted out via label for PR #{pr.number}")
             return False
 
         # Refresh mergeable status
@@ -291,25 +293,25 @@ class FixAgent:
             try:
                 pr.update()
             except Exception as e:
-                log.warning(f"  Failed to update PR data: {e}")
+                log.warning(f"  ⚠️ Failed to update PR data: {e}")
 
         if pr.mergeable is False:
-            log.warning(f"  PR #{pr.number} is not mergeable (conflicts)")
+            log.warning(f"  ⚠️ PR #{pr.number} is not mergeable (conflicts)")
             return False
 
         # None means GitHub is still calculating — wait, don't fail
         if pr.mergeable is not True:
-            log.info(f"  PR #{pr.number} mergeable status is {pr.mergeable} (waiting for calculation)")
+            log.info(f"  ⏳ PR #{pr.number} mergeable status is {pr.mergeable} (waiting for calculation)")
             return False
 
         # Don't attempt merge while CI checks are still running — would throw and trigger needs-human
         if pr.mergeable_state in ("pending", "unknown", None):
-            log.info(f"  PR #{pr.number} mergeable_state is '{pr.mergeable_state}' — waiting for checks")
+            log.info(f"  ⏳ PR #{pr.number} mergeable_state is '{pr.mergeable_state}' — waiting for checks")
             return False
 
         cycles = self._count_fix_cycles(pr)
         if cycles > MAX_FIX_CYCLES:
-            log.warning(f"  Fix cycle count ({cycles}) exceeds MAX_FIX_CYCLES ({MAX_FIX_CYCLES})")
+            log.warning(f"  ⚠️ Fix cycle count ({cycles}) exceeds MAX_FIX_CYCLES ({MAX_FIX_CYCLES})")
             raise Exception(f"Fix cycle count ({cycles}) exceeds MAX_FIX_CYCLES ({MAX_FIX_CYCLES})")
 
         latest_review = self._get_latest_foreman_review(pr)
@@ -321,7 +323,7 @@ class FixAgent:
 
         # Ensure no remaining critical issues in the latest review body
         if "[CRITICAL]" in latest_review.upper() or "[IMPORTANT]" in latest_review.upper():
-            log.warning(f"  PR #{pr.number} has APPROVE verdict but still lists critical issues")
+            log.warning(f"  ⚠️ PR #{pr.number} has APPROVE verdict but still lists critical issues")
             raise Exception("PR has APPROVE verdict but still lists critical/important issues")
 
         return True
@@ -332,10 +334,10 @@ class FixAgent:
             if not self._is_approve_ready(pr):
                 return
 
-            log.info(f"  PR #{pr.number} is ready for auto-merge")
+            log.info(f"  ✅ PR #{pr.number} is ready for auto-merge")
             
             if self.dry_run:
-                log.info(f"  [DRY RUN] Would auto-merge PR #{pr.number}")
+                log.info(f"  ✅ [DRY RUN] Would auto-merge PR #{pr.number}")
                 return
 
             status = pr.merge(
@@ -345,11 +347,11 @@ class FixAgent:
             )
             if not status.merged:
                 raise Exception(f"GitHub API returned merged=False: {getattr(status, 'message', 'unknown')}")
-            log.info(f"  PR #{pr.number} merged successfully")
+            log.info(f"  ✅ PR #{pr.number} merged successfully")
             tg(f"✅ Auto-merged PR #{pr.number}: {pr.title}\n{pr.html_url}")
 
         except Exception as e:
-            log.error(f"  Auto-merge failed for PR #{pr.number}: {e}")
+            log.error(f"  ❌ Auto-merge failed for PR #{pr.number}: {e}")
             try:
                 if not self.dry_run:
                     pr.add_to_labels(LABEL_NEEDS_HUMAN)
@@ -359,45 +361,45 @@ class FixAgent:
 
     def fix_pr(self, pr) -> bool:
         """Apply fixes to a PR based on the latest FOREMAN review."""
-        log.info(f"Fixing PR #{pr.number}: {pr.title}")
+        log.info(f"🛠️ Fixing PR #{pr.number}: {pr.title}")
 
         # Check for auto-merge first
         latest_review = self._get_latest_foreman_review(pr)
         if latest_review:
             if '"verdict": "APPROVE"' in latest_review:
-                log.info(f"  Latest review is APPROVE — checking auto-merge")
+                log.info(f"  ✅ Latest review is APPROVE — checking auto-merge")
                 self._try_auto_merge(pr)
                 self.stats["skipped"] += 1
                 return True
             
             # Prevent infinite waste loop: skip if the latest review has no actionable issues
             if "[CRITICAL]" not in latest_review.upper() and "[IMPORTANT]" not in latest_review.upper():
-                log.info(f"  Latest review has no actionable issues — skipping")
+                log.info(f"  ⏭️ Latest review has no actionable issues — skipping")
                 self.stats["skipped"] += 1
                 return True
 
         # Check cycle count
         cycles = self._count_fix_cycles(pr)
         if cycles >= MAX_FIX_CYCLES:
-            log.info(f"  Max fix cycles ({MAX_FIX_CYCLES}) reached — skipping")
+            log.info(f"  🛑 Max fix cycles ({MAX_FIX_CYCLES}) reached — skipping")
             self.stats["skipped"] += 1
             return True
 
         # Get all reviews with issues
         all_reviews = self._get_all_foreman_reviews(pr)
         if not all_reviews:
-            log.info(f"  No actionable FOREMAN review found — skipping")
+            log.info(f"  ⏭️ No actionable FOREMAN review found — skipping")
             self.stats["skipped"] += 1
             return True
 
         # Skip if the latest verdict is APPROVE (redundant but safe)
         if '"verdict": "APPROVE"' in all_reviews[-1]:
-            log.info(f"  Latest review is APPROVE — nothing to fix")
+            log.info(f"  ✅ Latest review is APPROVE — nothing to fix")
             self.stats["skipped"] += 1
             return True
         # Convergence check: if same criticals appear two rounds in a row, escalate
         if len(all_reviews) >= 2 and self._criticals_overlap(all_reviews[-1], all_reviews[-2]):
-            log.warning(f"  Fix agent stalled — same criticals in rounds {len(all_reviews)-1} and {len(all_reviews)}")
+            log.warning(f"  ⚠️ Fix agent stalled — same criticals in rounds {len(all_reviews)-1} and {len(all_reviews)}")
             if not self.dry_run:
                 try:
                     pr.add_to_labels(self.repo.get_label(LABEL_NEEDS_HUMAN))
@@ -416,18 +418,18 @@ class FixAgent:
         # Skip if the latest verdict is APPROVE — nothing to fix
         review_body = all_reviews[-1]
         if '"verdict": "APPROVE"' in review_body:
-            log.info(f"  Latest review is APPROVE — skipping fix")
+            log.info(f"  ✅ Latest review is APPROVE — skipping fix")
             self.stats["skipped"] += 1
             return True
 
         review_body = all_reviews[-1]
         affected_files = self._parse_affected_files(review_body)
         if not affected_files:
-            log.warning(f"  Could not parse affected files from review — skipping")
+            log.warning(f"  ⚠️ Could not parse affected files from review — skipping")
             self.stats["skipped"] += 1
             return True
 
-        log.info(f"  Affected files: {affected_files}")
+        log.info(f"  📂 Affected files: {affected_files}")
 
         branch = pr.head.ref
 
@@ -439,9 +441,9 @@ class FixAgent:
                     head="main",
                     commit_message=f"Merge main into {branch}",
                 )
-                log.info(f"  Merged main into {branch}")
+                log.info(f"  🔗 Merged main into {branch}")
             except Exception as e:
-                log.warning(f"  Could not merge main into branch: {e}")
+                log.warning(f"  ⚠️ Could not merge main into branch: {e}")
 
         # Claim the PR
         if not self.dry_run:
@@ -464,7 +466,7 @@ class FixAgent:
                     current_content = contents.decoded_content.decode("utf-8")
                     file_sha = contents.sha
                 except Exception as e:
-                    log.warning(f"  Could not read {filepath} from branch {branch}: {e}")
+                    log.warning(f"  ⚠️ Could not read {filepath} from branch {branch}: {e}")
                     continue
 
                 # Build full review history for this file
@@ -476,13 +478,15 @@ class FixAgent:
 
                 # Generate patches — up to 2 attempts
                 model = self.router.get("fix")
-                log.info(f"  Generating patches for {filepath} ({len(all_reviews)} review round(s) of context)")
+                log.info(f"  🧠 Generating patches for {filepath} ({len(all_reviews)} review round(s) of context)")
                 prompt = (
                     f"## Review History\n\n{review_history}\n\n"
                     f"## Current File: {filepath}\n\n{current_content}"
                 )
 
                 patched = None
+                total_patches = 0
+                applied_patches = 0
                 for attempt in range(2):
                     response = self.llm.complete(
                         model=model,
@@ -491,28 +495,30 @@ class FixAgent:
                         max_tokens=None,
                     )
                     self.cost.record(model, response, agent="fixer", action="fix")
+                    log.info(f"  💰 LLM Call ({model}): ${getattr(response, 'cost', 0):.4f}")
 
                     patches = parse_json(response.text)
                     if patches is None:
-                        log.warning(f"  Attempt {attempt+1}: invalid JSON response for {filepath}")
+                        log.warning(f"  ⚠️ Attempt {attempt+1}: invalid JSON response for {filepath}")
                         prompt += "\n\nYour previous response was not valid JSON. Output ONLY a JSON array."
                         continue
 
-                    patched_content, errors = apply_patches(current_content, patches)
+                    total_patches = len(patches)
+                    patched_content, errors, applied_patches = apply_patches(current_content, patches)
                     if errors:
-                        log.warning(f"  Attempt {attempt+1}: patch errors for {filepath}: {errors}")
+                        log.warning(f"  ⚠️ Attempt {attempt+1}: patch errors for {filepath}: {errors}")
                         prompt += f"\n\nPatch application failed:\n" + "\n".join(errors) + "\nFix your search strings."
                         continue
 
                     warnings = check_scope(current_content, patched_content, review_body)
                     if warnings:
-                        log.warning(f"  Scope warnings for {filepath}: {warnings}")
+                        log.warning(f"  ⚠️ Scope warnings for {filepath}: {warnings}")
 
                     if filepath.endswith(".py"):
                         try:
                             ast.parse(patched_content)
                         except SyntaxError as e:
-                            log.warning(f"  Attempt {attempt+1}: syntax error in patched {filepath}: {e}")
+                            log.warning(f"  ⚠️ Attempt {attempt+1}: syntax error in patched {filepath}: {e}")
                             prompt += f"\n\nPatched file has syntax error: {e}. Fix it."
                             continue
 
@@ -520,14 +526,15 @@ class FixAgent:
                     break
 
                 if patched is None:
-                    log.error(f"  All patch attempts failed for {filepath} — skipping")
+                    log.error(f"  ❌ All patch attempts failed for {filepath} — skipping")
                     self.stats["failed"] += 1
                     continue
 
                 if patched.strip() == current_content.strip():
-                    log.info(f"  No changes needed for {filepath}")
+                    log.info(f"  ⏭️ No changes needed for {filepath}")
                     continue
 
+                log.info(f"  ✅ Applied {applied_patches}/{total_patches} patches to {filepath}")
                 fixes_ready.append((filepath, patched, file_sha))
 
             # Release fixing label BEFORE pushing so push-triggered review can run
@@ -547,10 +554,10 @@ class FixAgent:
                         file_sha,
                         branch=branch,
                     )
-                    log.info(f"  Pushed fix for {filepath}")
+                    log.info(f"  🚀 Pushed fix for {filepath}")
                     fixes_applied.append(filepath)
                 else:
-                    log.info(f"  [DRY RUN] Would push fix for {filepath}")
+                    log.info(f"  🚧 [DRY RUN] Would push fix for {filepath}")
 
             # Post summary comment
             if fixes_applied:
@@ -564,16 +571,16 @@ class FixAgent:
                     except Exception:
                         pass
                     tg(f"🔧 Fix agent pushed fixes to PR #{pr.number}: {', '.join(fixes_applied)}\n{pr.html_url}")
-                log.info(f"  Fixed {len(fixes_applied)} files")
+                log.info(f"  ✅ Fixed {len(fixes_applied)} files")
                 self.stats["fixed"] += 1
             else:
-                log.info(f"  No fixes were applied")
+                log.info(f"  ⏭️ No fixes were applied")
                 self.stats["skipped"] += 1
 
             return True
 
         except Exception as e:
-            log.error(f"  Fix failed for PR #{pr.number}: {e}", exc_info=True)
+            log.error(f"  ❌ Fix failed for PR #{pr.number}: {e}", exc_info=True)
             self.stats["failed"] += 1
             tg(f"❌ Fix agent failed on PR #{pr.number}: {e}\n{pr.html_url}")
             return False
@@ -602,11 +609,11 @@ class FixAgent:
         return fixable
 
     def run_once(self, pr_number: int = None) -> dict:
-        log.info("=" * 60)
-        log.info(f"FOREMAN fixer @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
+        log.info("🛠️ " + "=" * 58)
+        log.info(f"🛠️ FOREMAN fixer @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
 
         if not self.cost.check_ceiling():
-            log.warning("Parked — cost ceiling reached")
+            log.warning("🛑 Parked — cost ceiling reached")
             return self.stats
 
         if pr_number:
@@ -614,20 +621,20 @@ class FixAgent:
                 pr = self.repo.get_pull(pr_number)
                 self.fix_pr(pr)
             except Exception as e:
-                log.error(f"Failed to process PR #{pr_number}: {e}")
+                log.error(f"❌ Failed to process PR #{pr_number}: {e}")
         else:
             queue = self.get_fixable_prs()
-            log.info(f"Eligible PRs: {len(queue)}")
+            log.info(f"📋 Eligible PRs: {len(queue)}")
             for pr in queue:
                 try:
                     self.fix_pr(pr)
                 except Exception as e:
-                    log.error(f"Error processing PR #{pr.number}: {e}")
+                    log.error(f"❌ Error processing PR #{pr.number}: {e}")
                 if not self.cost.check_ceiling():
                     break
 
-        log.info(f"Stats: {self.stats}")
-        log.info(f"{self.cost.summary()}")
+        log.info(f"📊 Stats: {self.stats}")
+        log.info(f"💰 {self.cost.summary()}")
         return self.stats
 
 

@@ -35,6 +35,8 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("foreman.implement")
+# Suppress noisy internal logs
+logging.getLogger("litellm").setLevel(logging.WARNING)
 
 def get_coding_standards() -> str:
     """Reads STANDARDS.md from the repository root."""
@@ -214,7 +216,8 @@ class ImplementAgent:
     def _complete(self, task: str, system: str, message: str, max_tokens: int = None):
         model = self.router.get(task)
         response = self.llm.complete(model, system, message, max_tokens)
-        self.cost.record(model, response, agent="implement", action=task)
+        cost = self.cost.record(model, response, agent="implement", action=task)
+        log.info(f"  💰 Cost: ${cost:.4f} | Model: {model}")
         return response
 
     def _parse_json(self, text: str, label: str) -> dict | None:
@@ -310,6 +313,8 @@ class ImplementAgent:
             branch = plan["branch"]
             files = plan["files"][:MAX_FILES_PER_ISSUE]
             log.info(f"  Plan: branch={branch}, {len(files)} files")
+            for f in files:
+                log.info(f"    - {f['path']} ({f['action']}): {f.get('description', '')}")
             self.github.ensure_branch(branch)
             for file_spec in files:
                 log.info(f"  Generating: {file_spec['path']} ({file_spec['action']})")
