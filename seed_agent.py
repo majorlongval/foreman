@@ -37,7 +37,7 @@ MAX_OPEN_DRAFTS = int(os.environ.get("MAX_OPEN_DRAFTS", "10"))
 COST_CEILING_USD = float(os.environ.get("COST_CEILING_USD", "5.0"))
 
 # Promotion logic
-AUTO_PROMOTE_DELAY_HOURS = int(os.environ.get("AUTO_PROMOTE_DELAY_HOURS", "2"))
+AUTO_PROMOTE_DELAY_HOURS = float(os.environ.get("AUTO_PROMOTE_DELAY_HOURS", "2.0"))
 AUTO_PROMOTE_MAX_PER_CYCLE = int(os.environ.get("AUTO_PROMOTE_MAX_PER_CYCLE", "3"))
 
 # Routing profile: "cheap", "balanced", or "quality"
@@ -138,15 +138,15 @@ class GitHubClient:
             log.error(f"Error fetching refinement queue: {e}")
             raise
 
-    def get_auto_refined_issues(self) -> list:
-        """Get open issues labeled 'auto-refined'."""
+    def get_auto_refined_issues(self):
+        """Get open issues labeled 'auto-refined', paginated (don't exhaust all pages)."""
         try:
-            return list(self.repo.get_issues(
+            return self.repo.get_issues(
                 state="open",
-                labels=[self.repo.get_label(LABEL_AUTO_REFINED)],
+                labels=[LABEL_AUTO_REFINED],
                 sort="created",
                 direction="asc",
-            ))
+            )
         except Exception as e:
             log.error(f"Error fetching auto-refined issues: {e}")
             return []
