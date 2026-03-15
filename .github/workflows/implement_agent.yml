@@ -6,7 +6,7 @@ on:
   workflow_dispatch:      # Manual trigger — picks next ready issue automatically
 
 concurrency:
-  group: foreman-pipeline
+  group: implement-agent
   cancel-in-progress: false
 
 jobs:

@@ -10,8 +10,8 @@ on:
         required: false
 
 concurrency:
-  group: foreman-pipeline
-  cancel-in-progress: false
+  group: fix-${{ github.event.pull_request.number || github.event.inputs.pr_number || 'manual' }}
+  cancel-in-progress: true
 
 jobs:
   fix:

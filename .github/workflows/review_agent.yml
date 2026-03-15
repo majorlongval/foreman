@@ -6,8 +6,8 @@ on:
   workflow_dispatch:               # Manual trigger
 
 concurrency:
-  group: foreman-pipeline
-  cancel-in-progress: false
+  group: review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   review:
