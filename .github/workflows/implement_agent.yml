@@ -5,6 +5,10 @@ on:
     types: [labeled]      # Triggers when any issue is labeled
   workflow_dispatch:      # Manual trigger — picks next ready issue automatically
 
+concurrency:
+  group: foreman-pipeline
+  cancel-in-progress: false
+
 jobs:
   implement:
     runs-on: ubuntu-latest

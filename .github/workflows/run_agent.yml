@@ -13,6 +13,10 @@ on:
   issues:
     types: [labeled]      # Trigger when any issue is labeled
 
+concurrency:
+  group: foreman-pipeline
+  cancel-in-progress: false
+
 jobs:
   run_agent:
     runs-on: ubuntu-latest
