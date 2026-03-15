@@ -5,6 +5,7 @@ Supports:
   - Anthropic (Claude)
   - Google Gemini
   - OpenAI, Groq, Together, Ollama, LM Studio
+  - Perplexity (Research)
   - Any LiteLLM-supported provider
 
 All providers expose the same interface: complete(system, user_message) → LLMResponse
@@ -15,6 +16,7 @@ Model strings use a "provider/model" format:
   - "openai/gpt-4o"
   - "groq/llama-3.3-70b-versatile"
   - "ollama/qwen2.5-coder:32b"
+  - "perplexity/llama-3-sonar-large-32k-online"
 
 Usage:
     from llm_client import LLMClient
@@ -85,6 +87,10 @@ PRICING = {
     "groq/llama-3.3-70b-versatile":        {"input": 0.59, "output": 0.79},
     "groq/gemma2-9b-it":                   {"input": 0.20, "output": 0.20},
 
+    # Perplexity
+    "perplexity/llama-3-sonar-small-32k-online": {"input": 0.20, "output": 0.20},
+    "perplexity/llama-3-sonar-large-32k-online": {"input": 1.00, "output": 1.00},
+
     # Local models (free)
     "ollama/any":                          {"input": 0.0, "output": 0.0},
 }
@@ -118,6 +124,7 @@ class LLMClient:
 
     def __init__(self):
         self._ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        self._perplexity_base = "https://api.perplexity.ai"
         # Map existing env vars to litellm expected names if needed
         if os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
             os.environ["GOOGLE_API_KEY"] = os.environ["GEMINI_API_KEY"]
@@ -148,6 +155,8 @@ class LLMClient:
             
             if provider == "ollama":
                 kwargs["api_base"] = self._ollama_base
+            elif provider == "perplexity":
+                kwargs["api_base"] = self._perplexity_base
 
             log.info(f"  🤖 {model}" + (f" (max {max_tokens} tokens)" if max_tokens else ""))
             
@@ -211,6 +220,7 @@ ROUTING_PROFILES = {
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "gemini/gemini-3-flash-preview",
         "plan": "gemini/gemini-3.1-pro-preview",
+        "research": "perplexity/llama-3-sonar-small-32k-online",
         "embed": "gemini/text-embedding-004",
     },
     "balanced": {
@@ -223,6 +233,7 @@ ROUTING_PROFILES = {
         "commit_msg": "gemini/gemini-3.1-flash-lite-preview",
         "implement": "anthropic/claude-sonnet-4-6",
         "plan": "anthropic/claude-opus-4-6",
+        "research": "perplexity/llama-3-sonar-large-32k-online",
         "embed": "openai/text-embedding-3-small",
     },
     "quality": {
@@ -235,6 +246,7 @@ ROUTING_PROFILES = {
         "commit_msg": "anthropic/claude-sonnet-4-6",
         "implement": "anthropic/claude-opus-4-6",
         "plan": "anthropic/claude-opus-4-6",
+        "research": "perplexity/llama-3-sonar-large-32k-online",
         "embed": "openai/text-embedding-3-large",
     },
 }
