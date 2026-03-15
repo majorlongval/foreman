@@ -42,6 +42,9 @@ log = logging.getLogger("foreman.llm")
 litellm.telemetry = False
 litellm.drop_params = True # Silently drop unsupported params like thinking_config
 
+# Suppress noisy internal litellm logs
+logging.getLogger("litellm").setLevel(logging.WARNING)
+
 # ─── Response ────────────────────────────────────────────────
 
 @dataclass
@@ -160,7 +163,7 @@ class LLMClient:
             input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
             output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
             cost = estimate_cost(model, input_tokens, output_tokens)
-            log.info(f"  ✓ {input_tokens} in / {output_tokens} out = ${cost:.4f}")
+            log.info(f"  💰 {input_tokens} in / {output_tokens} out = ${cost:.4f}")
             return LLMResponse(
                 text=text,
                 input_tokens=input_tokens,
@@ -191,7 +194,7 @@ class LLMClient:
             input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
             cost = estimate_cost(model, input_tokens, 0)
             
-            log.info(f"  ✓ embedding {input_tokens} tokens = ${cost:.4f}")
+            log.info(f"  💰 embedding {input_tokens} tokens = ${cost:.4f}")
             return response.data[0].embedding
         except Exception as e:
             log.error(f"  Embedding generation failed: {e}")
