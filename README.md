@@ -31,6 +31,7 @@ cp .env.example .env
 # Edit .env with your tokens:
 #   GITHUB_TOKEN  — needs 'repo' scope (github.com/settings/tokens)
 #   ANTHROPIC_API_KEY — from console.anthropic.com
+#   PERPLEXITY_API_KEY — from perplexity.ai (for research agent)
 #   FOREMAN_REPO  — e.g. "jordanuser/foreman"
 ```
 
@@ -77,6 +78,7 @@ railway up
 # Set env vars
 railway variables set GITHUB_TOKEN=ghp_xxx
 railway variables set ANTHROPIC_API_KEY=sk-ant-xxx
+railway variables set PERPLEXITY_API_KEY=pplx-xxx
 railway variables set FOREMAN_REPO=youruser/foreman
 ```
 
@@ -90,7 +92,11 @@ railway variables set FOREMAN_REPO=youruser/foreman
     agent REFINES → creates "auto-refined" issue
                   → tags original "deprecated"
          │
-    ready for implementation
+    READY (relabel → "ready")
+         │
+    EXECUTION:
+    - If label "research": Research Agent (Perplexity) → Markdown PR
+    - Otherwise: Implementation Agent → Code PR
 ```
 
 ## Commands
@@ -107,6 +113,7 @@ railway variables set FOREMAN_REPO=youruser/foreman
 |-----|---------|-------------|
 | `GITHUB_TOKEN` | required | GitHub PAT with repo scope |
 | `ANTHROPIC_API_KEY` | required | Anthropic API key |
+| `PERPLEXITY_API_KEY` | optional | Perplexity API key for research agent |
 | `FOREMAN_REPO` | required | `owner/repo` format |
 | `POLL_INTERVAL` | `60` | Seconds between passes |
 | `BRAINSTORM_THRESHOLD` | `2` | If queue < this, brainstorm |
@@ -123,6 +130,7 @@ the drafts, and the cycle continues. Over time, the agent builds out:
 1. Telegram bot (so you can manage it from your phone)
 2. Real-time dashboard (wired to live agent state)
 3. Code implementation mode (auto-PRs)
-4. Multi-agent orchestration
+4. Research mode (automated markdown summaries via Perplexity)
+5. Multi-agent orchestration
 
 See [VISION.md](./VISION.md) for the full roadmap.
