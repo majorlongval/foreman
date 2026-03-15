@@ -455,16 +455,10 @@ class PRReviewer:
             # --- Pre-check: Test Presence (Issue #57) ---
             test_report = self._validate_test_presence(pr, files)
             if test_report:
-                log.info(f"  🛑 Quality check failed for PR #{pr.number}. Posting requirements.")
+                log.info(f"  ⚠️ Test presence warning for PR #{pr.number} — continuing with full review.")
                 if not any(test_report in r for r in prior_reviews):
                     if not self.dry_run:
-                        pr.create_review(body=test_report + BOT_SIGNATURE, event="COMMENT")
-                    else:
-                        log.info(f"  [DRY RUN] Would post automated test check: {test_report}")
-                else:
-                    log.info(f"  ℹ️ Test presence check already posted. Skipping duplicate comment.")
-                self.stats["reviewed"] += 1
-                return True
+                        pr.create_issue_comment(test_report + BOT_SIGNATURE)
             # --------------------------------------------
 
             MAX_DIFF_CHARS = 100000
