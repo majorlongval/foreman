@@ -1,3 +1,4 @@
+python
 """
   python implement_agent.py --once          # Single pass then exit
   python implement_agent.py --issue 8       # Process a specific issue
@@ -11,6 +12,8 @@ import json
 import time
 import logging
 import argparse
+import subprocess
+import shutil
 from datetime import datetime, timezone
 from github import Github, GithubException
 from cost_monitor import CostTracker
@@ -27,6 +30,7 @@ MAX_FILES_PER_ISSUE = int(os.environ.get("MAX_FILES_PER_ISSUE", "10"))
 LABEL_READY = "ready"
 LABEL_IMPLEMENTING = "foreman-implementing"
 LABEL_READY_FOR_REVIEW = "ready-for-review"
+LABEL_NEEDS_HUMAN = "needs-human"
 
 # ─── Logging ──────────────────────────────────────────────────
 logging.basicConfig(
@@ -105,6 +109,7 @@ class GitHubClient:
             LABEL_READY: "0075ca",              # blue
             LABEL_IMPLEMENTING: "e4a100",       # orange — in progress
             LABEL_READY_FOR_REVIEW: "e99695",   # pink — PR opened
+            LABEL_NEEDS_HUMAN: "e02d2d",        # red
         }
         for name, color in needed.items():
             if name not in existing:
@@ -244,6 +249,40 @@ class ImplementAgent:
         block = parts[1].split("##")[0].strip()
         return block
 
+    def _extract_tests(self, body: str) -> str:
+        block = self._extract_section(body, "Tests")
+        if not block:
+            return ""
+        code_blocks = re.findall(r"```python\s*(.*?)\s*```", block, re.DOTALL)
+        if not code_blocks:
+            code_blocks = re.findall(r"```\s*(.*?)\s*```", block, re.DOTALL)
+        return "\n\n".join(cb.strip() for cb in code_blocks)
+
+    def _write_local(self, path: str, content: str):
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            log.info(f"  Wrote local: {path}")
+        except Exception as e:
+            log.error(f"  Failed to write local file {path}: {e}")
+
+    def _run_pytest(self) -> tuple[bool, str]:
+        log.info("  Running pytest verification...")
+        try:
+            result = subprocess.run(
+                ["pytest", "--tb=short", "-v"],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            success = (result.returncode == 0)
+            output = result.stdout + "\n" + result.stderr
+            return success, output
+        except Exception as e:
+            log.error(f"  Pytest execution failed: {e}")
+            return False, str(e)
+
     def _build_plan_message(self, issue, file_tree: list[str]) -> str:
         tree_str = "\n".join(f"  {p}" for p in file_tree[:500])
         return (
@@ -252,16 +291,22 @@ class ImplementAgent:
             f"## Repository File Tree\n\n{tree_str}"
         )
 
-    def _build_implement_message(self, issue, plan: dict, file_spec: dict, context: dict) -> str:
+    def _build_implement_message(self, issue, plan: dict, file_spec: dict, context: dict, error_logs: str = "") -> str:
         context_str = ""
         is_modify = file_spec["action"] == "modify"
         for path, content in context.items():
             limit = None if (is_modify and path == file_spec["path"]) else 20000
             body = content if limit is None else content[:limit]
             context_str += f"\n### {path}\n```\n{body}\n```\n"
+        
+        error_section = ""
+        if error_logs:
+            error_section = f"## Previous Attempt Failure Logs\n```\n{error_logs}\n```\n\nPlease fix the code to resolve these errors.\n\n"
+
         return (
             f"## Issue #{issue.number}: {issue.title}\n\n"
             f"{issue.body or ''}\n\n"
+            f"{error_section}"
             f"## Implementation Plan\n"
             f"Branch: {plan['branch']}\n"
             f"File: {file_spec['path']}\n"
@@ -270,17 +315,21 @@ class ImplementAgent:
             f"## Context Files\n{context_str}"
         )
 
-    def _build_pr_body(self, issue, plan: dict, branch: str) -> str:
+    def _build_pr_body(self, issue, plan: dict, branch: str, test_logs: str) -> str:
         files_list = "\n".join(
             f"- `{f['path']}` ({f['action']}): {f['description']}"
             for f in plan["files"]
         )
         acceptance = self._extract_section(issue.body, "Acceptance Criteria")
+        
+        logs_fmt = f"\n<details>\n<summary>Pytest Output</summary>\n\n```\n{test_logs}\n```\n</details>"
+        
         return (
             f"## Summary\n\n{plan['pr_summary']}\n\n"
             f"## Closes\n\nCloses #{issue.number}\n\n"
             f"## Files Changed\n\n{files_list}\n\n"
             f"## Acceptance Criteria\n\n{acceptance}\n\n"
+            f"## Test Results\n{logs_fmt}\n\n"
             f"---\n_Implemented by FOREMAN_"
         )
 
@@ -310,58 +359,116 @@ class ImplementAgent:
             branch = plan["branch"]
             files = plan["files"][:MAX_FILES_PER_ISSUE]
             log.info(f"  Plan: branch={branch}, {len(files)} files")
+            
+            test_code = self._extract_tests(issue.body)
+            attempt = 0
+            last_error = ""
+            final_contents = {}
+            test_path = "test_acceptance_foreman.py"
+
+            while attempt < 2:
+                attempt += 1
+                log.info(f"  --- Attempt {attempt} ---")
+                
+                for file_spec in files:
+                    log.info(f"  Generating: {file_spec['path']} ({file_spec['action']})")
+                    context = {}
+                    for ctx_path in file_spec.get("relevant_context_paths", []):
+                        content, _ = self.github.get_file_contents(ctx_path)
+                        if content:
+                            context[ctx_path] = content
+                    
+                    # If we have content from previous attempt, use it as context if we are modifying
+                    if file_spec["path"] in final_contents:
+                        context[file_spec["path"]] = final_contents[file_spec["path"]]
+                    elif file_spec["action"] == "modify":
+                        existing_content, _ = self.github.get_file_contents(file_spec["path"])
+                        if existing_content:
+                            context[file_spec["path"]] = existing_content
+
+                    impl_response = self._complete(
+                        task="implement",
+                        system=IMPLEMENT_SYSTEM,
+                        message=self._build_implement_message(issue, plan, file_spec, context, last_error),
+                    )
+                    if not impl_response.text or not impl_response.text.strip():
+                        log.error(f"  LLM returned empty content for {file_spec['path']}")
+                        continue
+                        
+                    final_contents[file_spec["path"]] = impl_response.text
+                    self._write_local(file_spec["path"], impl_response.text)
+                    if not self.cost.check_ceiling():
+                        return False
+
+                if test_code:
+                    self._write_local(test_path, test_code)
+
+                success, logs = self._run_pytest()
+                if success:
+                    log.info("  ✅ Acceptance tests passed!")
+                    last_error = logs # For inclusion in PR
+                    break
+                else:
+                    log.warning(f"  ❌ Attempt {attempt} failed tests.")
+                    last_error = logs
+                    if attempt == 2:
+                        log.error("  Giving up after 2 attempts.")
+                        if not self.dry_run:
+                            issue.add_to_labels(LABEL_NEEDS_HUMAN)
+                            issue.create_comment(f"🤖 FOREMAN failed to pass acceptance tests after 2 attempts.\n\n**Pytest Output:**\n```\n{logs}\n```")
+                        if os.path.exists(test_path):
+                            os.remove(test_path)
+                        return False
+
+            # If we reach here, tests passed or we are on attempt 1/2 success
             self.github.ensure_branch(branch)
-            for file_spec in files:
-                log.info(f"  Generating: {file_spec['path']} ({file_spec['action']})")
-                context = {}
-                for ctx_path in file_spec.get("relevant_context_paths", []):
-                    content, _ = self.github.get_file_contents(ctx_path)
-                    if content:
-                        context[ctx_path] = content
-                _, existing_sha = self.github.get_file_contents(file_spec["path"], branch=branch)
-                if file_spec["action"] == "modify":
-                    existing_content, _ = self.github.get_file_contents(file_spec["path"], branch=branch)
-                    if existing_content:
-                        context[file_spec["path"]] = existing_content
-                impl_response = self._complete(
-                    task="implement",
-                    system=IMPLEMENT_SYSTEM,
-                    message=self._build_implement_message(issue, plan, file_spec, context),
-                )
-                log.info(f"  Generated {len(impl_response.text or '')} chars for {file_spec['path']}")
-                if not self.cost.check_ceiling():
-                    return False
+            for file_path, content in final_contents.items():
+                _, existing_sha = self.github.get_file_contents(file_path, branch=branch)
+                
+                file_spec = next((f for f in files if f["path"] == file_path), {"description": "Updated file"})
                 commit_response = self._complete(
                     task="commit_msg",
                     system="Write a single-line git commit message. Imperative tone. Max 72 chars. No quotes.",
-                    message=f"File: {file_spec['path']}\nDescription: {file_spec['description']}",
+                    message=f"File: {file_path}\nDescription: {file_spec.get('description', '')}",
                     max_tokens=200,
                 )
-                content = impl_response.text
-                if not content or not content.strip():
-                    log.error(f"  LLM returned empty content for {file_spec['path']} — skipping")
-                    self.stats["failed"] += 1
-                    continue
+                
                 self.github.commit_file(
                     branch=branch,
-                    path=file_spec["path"],
+                    path=file_path,
                     content=content,
                     message=commit_response.text.strip(),
                     existing_sha=existing_sha,
                 )
-                time.sleep(1)
-            pr_body = self._build_pr_body(issue, plan, branch)
+            
+            # Commit the acceptance test if it was created
+            if test_code:
+                _, existing_sha = self.github.get_file_contents(test_path, branch=branch)
+                self.github.commit_file(
+                    branch=branch,
+                    path=test_path,
+                    content=test_code,
+                    message="Add acceptance test for issue",
+                    existing_sha=existing_sha
+                )
+
+            pr_body = self._build_pr_body(issue, plan, branch, last_error)
             pr = self.github.create_pr(
                 branch=branch,
                 title=plan["pr_title"],
                 body=pr_body,
             )
+            
             if pr and not self.dry_run:
-                issue.create_comment(f"🤖 FOREMAN opened PR #{pr.number}: {pr.html_url}")
+                issue.create_comment(f"🤖 FOREMAN opened PR #{pr.number}: {pr.html_url}\n\nAcceptance tests passed successfully.")
                 issue.remove_from_labels(LABEL_READY)
                 issue.remove_from_labels(LABEL_IMPLEMENTING)
                 issue.add_to_labels(LABEL_READY_FOR_REVIEW)
                 tg(f"🔨 PR opened for #{issue.number}: <b>{issue.title}</b>\n{pr.html_url}")
+            
+            if os.path.exists(test_path):
+                os.remove(test_path)
+                
             self.stats["implemented"] += 1
             log.info(f"  ✅ Done #{issue.number}")
             return True
