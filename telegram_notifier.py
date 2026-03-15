@@ -53,6 +53,47 @@ def notify(message: str) -> bool:
 
     return False
 
+def notify_auto_merge(pr_number: int, pr_title: str, confidence: float) -> bool:
+    """Notify that a PR has been auto-merged due to high confidence."""
+    try:
+        msg = (
+            f"✅ <b>PR Auto-Merged</b>\n"
+            f"PR #{pr_number}: {pr_title}\n"
+            f"Confidence: {confidence:.1f}%"
+        )
+        return notify(msg)
+    except Exception as e:
+        log.error(f"  📱 Failed to send auto-merge notification: {e}")
+        return False
+
+def notify_manual_review(pr_number: int, pr_title: str, confidence: float, verdict: str) -> bool:
+    """Notify that a PR requires manual intervention."""
+    try:
+        msg = (
+            f"⏳ <b>Manual Review Needed</b>\n"
+            f"PR #{pr_number}: {pr_title}\n"
+            f"Verdict: {verdict}\n"
+            f"Confidence: {confidence:.1f}%\n"
+            f"Awaiting human operator approval."
+        )
+        return notify(msg)
+    except Exception as e:
+        log.error(f"  📱 Failed to send manual review notification: {e}")
+        return False
+
+def notify_fix_loop_exhausted(pr_number: int, pr_title: str, max_retries: int) -> bool:
+    """Notify that the automated fix cycle has exhausted retries."""
+    try:
+        msg = (
+            f"⚠️ <b>Fix Loop Exhausted</b>\n"
+            f"PR #{pr_number}: {pr_title}\n"
+            f"Max retries ({max_retries}) reached without passing review."
+        )
+        return notify(msg)
+    except Exception as e:
+        log.error(f"  📱 Failed to send fix loop exhausted notification: {e}")
+        return False
+
 # --- Bot Command Handling ---
 
 def _send_reply(chat_id: int, message: str) -> bool:
