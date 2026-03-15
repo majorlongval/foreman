@@ -136,11 +136,10 @@ class TestReviewAgentTestPresence(unittest.TestCase):
         """
         try:
             log.info("Starting test_validate_test_presence_skip_review")
-            from review_agent import LABEL_SKIP_REVIEW
             
             pr = MagicMock()
             label = MagicMock()
-            label.name = LABEL_SKIP_REVIEW
+            label.name = "skip-review"
             pr.labels = [label]
             pr.body = "Urgent fix for production outage."
             
