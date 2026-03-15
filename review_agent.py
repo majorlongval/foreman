@@ -274,7 +274,7 @@ class PRReviewer:
                 log.info(f"  ℹ️ PR #{pr.number} has skip-review label. Skipping test check.")
                 return None
             exempt_extensions = {".yml", ".yaml", ".json", ".toml", ".md", ".txt"}
-            exempt_files = {"requirements.txt", ".gitignore", "LICENSE", "PROCFILE"}
+            exempt_files = {"requirements.txt", ".gitignore", "LICENSE", "Procfile"}
             
             only_exempt = True
             has_source_changes = False
@@ -351,20 +351,22 @@ class PRReviewer:
                 return True
             diff = self.get_pr_diff(pr)
             files = self.get_changed_files(pr)
+            prior_reviews = self._get_prior_reviews(pr)
 
             # --- Pre-check: Test Presence (Issue #57) ---
             test_report = self._validate_test_presence(pr, files)
             if test_report:
                 log.info(f"  ⚠️ Test presence check failed for PR #{pr.number}")
-                if not self.dry_run:
-                    pr.create_review(body=test_report + BOT_SIGNATURE, event="COMMENT")
+                if not any(test_report in r for r in prior_reviews):
+                    if not self.dry_run:
+                        pr.create_review(body=test_report + BOT_SIGNATURE, event="COMMENT")
+                    else:
+                        log.info(f"  [DRY RUN] Would post automated test check: {test_report}")
                 else:
-                    log.info(f"  [DRY RUN] Would post automated test check: {test_report}")
+                    log.info(f"  ℹ️ Test presence check already posted. Skipping duplicate comment.")
                 self.stats["reviewed"] += 1
                 return True
             # --------------------------------------------
-
-            prior_reviews = self._get_prior_reviews(pr)
             MAX_DIFF_CHARS = 100000
             if len(diff) > MAX_DIFF_CHARS:
                 diff = diff[:MAX_DIFF_CHARS] + f"\n\n... [TRUNCATED]"
