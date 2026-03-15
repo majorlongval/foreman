@@ -252,6 +252,19 @@ Break the work into concrete subtasks:
 - [ ] Subtask 2
 (minimum 2 subtasks)
 
+## Tests
+Provide concrete definition-of-done via pytest stubs.
+Include at least two `pytest` function stubs: one happy path and one edge/failure case.
+Use Given/When/Then comment structure inside the stubs.
+Tests must use mocks/fixtures for external boundaries (GitHub API, LLMs).
+
+Example:
+def test_happy_path_example(mocker):
+    # Given: ...
+    # When: ...
+    # Then: ...
+    pass
+
 ## Complexity Estimate
 - T-shirt size: XS / S / M / L / XL
 - Estimated API cost: low / medium / high
@@ -261,6 +274,7 @@ Rules:
 - If the original is vague, make reasonable assumptions and state them
 - Title should be imperative: "Add X", "Fix Y", "Implement Z"
 - Be concise. No filler. Every word earns its place.
+- EVERY refined issue MUST include the ## Tests section with at least two stubs.
 """
 
 BRAINSTORM_SYSTEM = """You are FOREMAN, an autonomous agent that generates new development tasks
@@ -398,6 +412,12 @@ class ForemanAgent:
                 return False
 
             refined_body = response.text
+
+            # Validation: Ensure ## Tests section and at least 2 pytest stubs
+            if "## Tests" not in refined_body or refined_body.count("def test_") < 2:
+                log.warning(f"  ⚠️ Refinement of #{issue.number} failed validation: missing or insufficient ## Tests section")
+                self.stats["failed"] += 1
+                return False
 
             # Extract a better title — route to title_gen (usually cheapest model)
             title_response = self._complete(
