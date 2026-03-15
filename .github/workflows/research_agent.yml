@@ -1,0 +1,54 @@
+name: Run Research Agent
+
+on:
+  issues:
+    types: [labeled]      # Triggers when any issue is labeled
+  workflow_dispatch:      # Manual trigger — picks next ready issue automatically
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ready'
+
+    permissions:
+      issues: write
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install --quiet -r requirements.txt
+
+      - name: Run Research Agent (label trigger)
+        if: github.event_name == 'issues'
+        run: python -m agents.research_agent --issue ${{ github.event.issue.number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FOREMAN_REPO: ${{ secrets.FOREMAN_REPO }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ROUTING_PROFILE: research
+          COST_CEILING_USD: "3.0"
+
+      - name: Run Research Agent (manual trigger — picks next ready issue)
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m agents.research_agent --once
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FOREMAN_REPO: ${{ secrets.FOREMAN_REPO }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ROUTING_PROFILE: research
+          COST_CEILING_USD: "3.0"
