@@ -41,6 +41,7 @@ log = logging.getLogger("foreman.llm")
 # LiteLLM configuration
 litellm.telemetry = False
 litellm.drop_params = True # Silently drop unsupported params like thinking_config
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 # ─── Response ────────────────────────────────────────────────
 
