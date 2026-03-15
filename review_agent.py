@@ -263,6 +263,75 @@ class PRReviewer:
             f"**Diff:**\n```\n{diff}\n```"
             + history
         )
+    def _validate_test_presence(self, pr, files: list[str]) -> str | None:
+        """
+        Validates that PRs with source changes include tests and execution evidence.
+        Returns a string with the issues found, or None if validation passes or is exempt.
+        """
+        try:
+            labels = [label.name for label in pr.labels] if hasattr(pr, 'labels') else []
+            if "skip-review" in labels:
+                log.info(f"  ℹ️ PR #{pr.number} has skip-review label. Skipping test check.")
+                return None
+            exempt_extensions = {".yml", ".yaml", ".json", ".toml", ".md", ".txt"}
+            exempt_files = {"requirements.txt", ".gitignore", "LICENSE", "Procfile"}
+            
+            only_exempt = True
+            has_source_changes = False
+            has_test_changes = False
+            
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                filename = os.path.basename(f)
+                
+                is_file_exempt = (ext in exempt_extensions) or (filename in exempt_files)
+                
+                if not is_file_exempt:
+                    only_exempt = False
+                    if f.endswith(".py"):
+                        if "test_" in filename:
+                            has_test_changes = True
+                        else:
+                            has_source_changes = True
+                    else:
+                        # Non-python non-config files (like shell scripts) are considered source
+                        has_source_changes = True
+                elif f.endswith(".py") and "test_" in filename:
+                    has_test_changes = True
+
+            if only_exempt:
+                log.info(f"  ℹ️ PR #{pr.number} only modifies configuration/documentation. Skipping test check.")
+                return None
+
+            issues = []
+            
+            # Rule: Source changed but no tests
+            if has_source_changes and not has_test_changes:
+                issues.append(
+                    "- **[CRITICAL]** Missing tests for source code changes. "
+                    "Please add `test_*.py` files covering the new logic."
+                )
+            
+            # Rule: Tests present but no execution output in description
+            if has_test_changes:
+                body = (pr.body or "").lower()
+                # Look for common pytest output markers
+                pytest_indicators = ["pytest", "test session starts", "passed", "failed", "collected", "test run"]
+                has_output = any(indicator in body for indicator in pytest_indicators)
+                
+                if not has_output:
+                    issues.append(
+                        "- **[IMPORTANT]** PR description lacks pytest execution output. "
+                        "Please paste the output of your local test run to provide evidence of execution."
+                    )
+            
+            if not issues:
+                return None
+                
+            return "## Automated Quality Check\n" + "\n".join(issues) + "\n\nThis PR requires testing evidence or test files before proceeding with a full review."
+        except Exception as e:
+            log.error(f"  ❌ Error in _validate_test_presence: {e}")
+            return None
     def review_pr(self, pr) -> bool:
         log.info(f"🔍 Reviewing PR #{pr.number}: {pr.title}")
         try:
@@ -283,6 +352,21 @@ class PRReviewer:
             diff = self.get_pr_diff(pr)
             files = self.get_changed_files(pr)
             prior_reviews = self._get_prior_reviews(pr)
+
+            # --- Pre-check: Test Presence (Issue #57) ---
+            test_report = self._validate_test_presence(pr, files)
+            if test_report:
+                log.info(f"  ⚠️ Test presence check failed for PR #{pr.number}")
+                if not any(test_report in r for r in prior_reviews):
+                    if not self.dry_run:
+                        pr.create_review(body=test_report + BOT_SIGNATURE, event="COMMENT")
+                    else:
+                        log.info(f"  [DRY RUN] Would post automated test check: {test_report}")
+                else:
+                    log.info(f"  ℹ️ Test presence check already posted. Skipping duplicate comment.")
+                self.stats["reviewed"] += 1
+                return True
+            # --------------------------------------------
             MAX_DIFF_CHARS = 100000
             if len(diff) > MAX_DIFF_CHARS:
                 diff = diff[:MAX_DIFF_CHARS] + f"\n\n... [TRUNCATED]"
