@@ -133,8 +133,8 @@ class HygieneAgent:
                         log.info(f"  Found reference to #{issue.number} in PR #{pr.number} body")
                         return pr
             
-            # Check PR title for issue number
-            if f"#{issue.number}" in pr.title:
+            # Check PR title for issue number (word boundary prevents #1 matching #10)
+            if re.search(rf"#{issue.number}\b", pr.title):
                 log.info(f"  Found reference to #{issue.number} in PR #{pr.number} title")
                 return pr
             
@@ -178,14 +178,19 @@ class HygieneAgent:
             if not relevant_paths:
                 relevant_paths = [p for p in paths if "/" not in p][:5]
 
-            # 2. Load context
+            # 2. Load context (file content cached across issues to avoid N+1 API calls)
+            if not hasattr(self, "_file_cache"):
+                self._file_cache = {}
             context = ""
             for path in relevant_paths:
-                try:
-                    content = self.repo.get_contents(path).decoded_content.decode("utf-8")
+                if path not in self._file_cache:
+                    try:
+                        self._file_cache[path] = self.repo.get_contents(path).decoded_content.decode("utf-8")
+                    except Exception:
+                        self._file_cache[path] = ""
+                content = self._file_cache[path]
+                if content:
                     context += f"\n--- FILE: {path} ---\n{content[:2500]}\n"
-                except:
-                    continue
 
             if not context:
                 return {"confidence": 0.0, "explanation": "No relevant files found."}
