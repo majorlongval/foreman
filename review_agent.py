@@ -137,6 +137,8 @@ Rules:
 - Remember: this code runs UNATTENDED. Failures must be graceful.
 - ALWAYS include a concrete "Suggested fix" code block for every CRITICAL and IMPORTANT issue.
   The fixer is a dumb model that will apply your suggestions literally — be precise and complete.
+  When suggesting a new test file, ensure the code block contains functional test logic covering the modified code in the PR, not just stubs.
+- In the `affected_files` list, ALWAYS use concrete filenames. If suggesting a new test file, use a specific path (e.g., `tests/test_logic.py`) rather than a glob pattern (e.g., `test_*.py`).
 - The Review Data JSON block MUST be the last section and MUST be valid JSON.
 - BE EXHAUSTIVE. Find ALL critical and important issues in this single pass. The fix/review
   loop costs real money — discovering new issues round by round is expensive. If prior reviews
@@ -373,6 +375,7 @@ class PRReviewer:
             only_exempt = True
             has_source_changes = False
             has_test_changes = False
+            source_files = []
             
             for f in files:
                 ext = os.path.splitext(f)[1].lower()
@@ -387,9 +390,11 @@ class PRReviewer:
                             has_test_changes = True
                         else:
                             has_source_changes = True
+                            source_files.append(f)
                     else:
                         # Non-python non-config files (like shell scripts) are considered source
                         has_source_changes = True
+                        source_files.append(f)
                 elif f.endswith(".py") and "test_" in filename:
                     has_test_changes = True
 
@@ -398,13 +403,24 @@ class PRReviewer:
                 return None
 
             issues = []
+            suggested_test_files = []
+            critical_count = 0
+            important_count = 0
             
             # Rule: Source changed but no tests
             if has_source_changes and not has_test_changes:
+                for sf in source_files:
+                    basename = os.path.basename(sf)
+                    test_file = f"tests/test_{basename}"
+                    if test_file not in suggested_test_files:
+                        suggested_test_files.append(test_file)
+                
+                test_list_str = ", ".join(f"`{t}`" for t in suggested_test_files) if suggested_test_files else "test files"
                 issues.append(
-                    "- **[CRITICAL]** Missing tests for source code changes. "
-                    "Please add `test_*.py` files covering the new logic."
+                    f"- **[CRITICAL]** Missing tests for source code changes. "
+                    f"Please add concrete test files: {test_list_str}."
                 )
+                critical_count += 1
             
             # Rule: Tests present but no execution output in description
             if has_test_changes:
@@ -418,11 +434,23 @@ class PRReviewer:
                         "- **[IMPORTANT]** PR description lacks pytest execution output. "
                         "Please paste the output of your local test run to provide evidence of execution."
                     )
+                    important_count += 1
             
             if not issues:
                 return None
                 
-            return "## Automated Quality Check\n" + "\n".join(issues) + "\n\nThis PR requires testing evidence or test files before proceeding with a full review."
+            report = "## Automated Quality Check\n" + "\n".join(issues) + "\n\nThis PR requires testing evidence or test files before proceeding with a full review."
+            
+            review_data = {
+                "verdict": "REQUEST_CHANGES",
+                "critical_count": critical_count,
+                "important_count": important_count,
+                "suggestion_count": 0,
+                "affected_files": suggested_test_files
+            }
+            
+            json_block = f"\n\n## Review Data\n```json\n{json.dumps(review_data, indent=2)}\n```"
+            return report + json_block
         except Exception as e:
             log.error(f"  ❌ Error in _validate_test_presence: {e}")
             return None

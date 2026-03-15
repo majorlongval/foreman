@@ -388,7 +388,13 @@ class FixAgent:
                 continue
             dirpart = '/'.join(fname.split('/')[:-1])
             test_name = f"test_{basename}"
+            
+            # Heuristic: if a tests/ directory is mentioned in affected_files, prefer that.
+            # Otherwise use the same directory as the source file.
             test_path = f"{dirpart}/{test_name}" if dirpart else test_name
+            if any(f.startswith('tests/') for f in concrete) and not test_path.startswith('tests/'):
+                test_path = f"tests/{test_name}"
+
             if test_path not in existing:
                 concrete.append(test_path)
                 existing.add(test_path)
@@ -519,23 +525,32 @@ class FixAgent:
                 # Create flow: generate full test file when it doesn't exist yet
                 if is_new_file:
                     source_basename = filepath.split('/')[-1].replace('test_', '', 1)
-                    source_dir = '/'.join(filepath.split('/')[:-1])
-                    source_path = f"{source_dir}/{source_basename}" if source_dir else source_basename
                     source_context = ""
+                    source_path = None
+                    
+                    # Search for source file context in the PR files
                     try:
-                        src_contents = self.repo.get_contents(source_path, ref=branch)
-                        source_context = src_contents.decoded_content.decode("utf-8")
-                    except Exception:
-                        log.warning(f"  ⚠️ Could not read source file {source_path} for test generation context")
+                        for pf in pr.get_files():
+                            if pf.filename.endswith(source_basename) and pf.filename != filepath:
+                                try:
+                                    src_contents = self.repo.get_contents(pf.filename, ref=branch)
+                                    source_context = src_contents.decoded_content.decode("utf-8")
+                                    source_path = pf.filename
+                                    break
+                                except Exception:
+                                    continue
+                    except Exception as e:
+                        log.warning(f"  ⚠️ Error while searching for source file context: {e}")
+
                     model = self.router.get("fix")
                     log.info(f"  🧠 Generating new test file: {filepath}")
                     create_prompt = (
                         f"## Source file: {source_path}\n\n```python\n{source_context}\n```\n\n"
                         f"## Review requirement\n\n{review_body}\n\n"
-                        f"Generate the complete content for `{filepath}`."
+                        f"Generate the complete content for `{filepath}`. Include necessary imports and tests covering the logic."
                     ) if source_context else (
                         f"## Review requirement\n\n{review_body}\n\n"
-                        f"Generate the complete content for `{filepath}`."
+                        f"Generate the complete content for `{filepath}`. Include necessary imports and tests covering the logic."
                     )
                     response = self.llm.complete(
                         model=model,
@@ -666,6 +681,8 @@ class FixAgent:
                                 pass
                         else:
                             raise
+                    except Exception as e:
+                        log.error(f"  ❌ Failed to push {filepath}: {e}")
                 else:
                     log.info(f"  🚧 [DRY RUN] Would push fix for {filepath}")
 
