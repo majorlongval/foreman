@@ -392,6 +392,9 @@ class FixAgent:
 
         # Skip if the latest verdict is APPROVE (redundant but safe)
         if '"verdict": "APPROVE"' in all_reviews[-1]:
+            log.info(f"  Latest review is APPROVE — nothing to fix")
+            self.stats["skipped"] += 1
+            return True
         # Convergence check: if same criticals appear two rounds in a row, escalate
         if len(all_reviews) >= 2 and self._criticals_overlap(all_reviews[-1], all_reviews[-2]):
             log.warning(f"  Fix agent stalled — same criticals in rounds {len(all_reviews)-1} and {len(all_reviews)}")
