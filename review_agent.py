@@ -80,6 +80,9 @@ Your job is to provide a thorough but concise code review. Focus on:
 - Documentation
 Only report issues you are HIGHLY CONFIDENT about. False positives block auto-merge
 and waste fix cycles. When in doubt, classify as SUGGESTION rather than CRITICAL/IMPORTANT.
+If "Automated Pre-check Findings" are provided in the input, you MUST include those 
+issues in your "Issues" section using the provided severity (CRITICAL/IMPORTANT), 
+and account for them in your "Verdict" and "Review Data".
 Output your review in this format:
 ## Summary
 One paragraph overall assessment. Is this PR safe to merge? What's the risk level?
@@ -170,6 +173,63 @@ class PRReviewer:
         return "\n\n".join(diff_parts)
     def get_changed_files(self, pr) -> list[str]:
         return [f.filename for f in pr.get_files()]
+    def _validate_test_presence(self, pr, files: list[str]) -> list[str]:
+        """Automated check for missing tests or execution evidence."""
+        # Filter out config/doc files
+        exempt_extensions = {".yml", ".yaml", ".json", ".toml", ".md", ".txt", ".gitignore", ".lock"}
+        exempt_files = {"requirements.txt", "LICENSE", "setup.cfg", "tox.ini", "Dockerfile", ".dockerignore"}
+        
+        source_py = []
+        test_py = []
+        
+        for f in files:
+            basename = os.path.basename(f)
+            ext = os.path.splitext(f)[1].lower()
+            
+            if ext in exempt_extensions or basename in exempt_files:
+                continue
+                
+            # Check if it's a test file: test_*.py or *_test.py or in a tests/ directory
+            is_test = (
+                (basename.startswith("test_") and f.endswith(".py")) or 
+                (basename.endswith("_test.py")) or
+                ("tests/" in f) or
+                (f.startswith("test_") and f.endswith(".py"))
+            )
+            
+            if is_test:
+                test_py.append(f)
+            elif f.endswith(".py"):
+                source_py.append(f)
+            else:
+                # Other non-py, non-exempt files are considered source
+                source_py.append(f)
+
+        if not source_py and not test_py:
+            log.info(f"  ℹ️ PR #{pr.number} contains only exempt files. Skipping test presence check.")
+            return []
+
+        issues = []
+        # Rule 1: Source changes without test changes -> CRITICAL
+        if source_py and not test_py:
+            issues.append(
+                "**[CRITICAL]** `PR` — Missing Tests: This PR modifies source code but does not "
+                "include corresponding test changes (e.g., `tests/test_*.py`). Please add tests."
+            )
+            
+        # Rule 2: Test changes without execution evidence -> IMPORTANT
+        if test_py:
+            body = (pr.body or "").lower()
+            # Indicators of pytest output blocks
+            indicators = ["test session starts", "collected", "passed", "short test summary info"]
+            if not any(ind in body for ind in indicators):
+                issues.append(
+                    "**[IMPORTANT]** `PR` — Missing Execution Evidence: This PR includes test files "
+                    "but no pytest execution output was found in the description. Please provide "
+                    "logs showing that tests passed."
+                )
+        
+        return issues
     def _parse_review_data(self, review_body: str) -> dict:
         defaults = {
             "verdict": "COMMENT",
@@ -242,7 +302,7 @@ class PRReviewer:
             if r.body and BOT_SIGNATURE.strip() in r.body and r.commit_id == head_sha:
                 return True
         return False
-    def _build_review_message(self, pr, diff: str, files: list[str], prior_reviews: list[str] = None) -> str:
+    def _build_review_message(self, pr, diff: str, files: list[str], prior_reviews: list[str] = None, pre_check_issues: list[str] = None) -> str:
         history = ""
         if prior_reviews:
             formatted = "\n\n---\n".join(
@@ -256,9 +316,19 @@ class PRReviewer:
                 f"2. Scan the entire diff for any remaining issues — be exhaustive. "
                 f"Do not discover new issues in future rounds."
             )
+        
+        pre_check_text = ""
+        if pre_check_issues:
+            pre_check_text = (
+                "## Automated Pre-check Findings\n"
+                "The following issues were detected by automated scans. You MUST include these in your review Issues section:\n"
+                + "\n".join(pre_check_issues) + "\n\n"
+            )
+
         return (
             f"## PR #{pr.number}: {pr.title}\n\n"
             f"**Description:**\n{pr.body or '(no description)'}\n\n"
+            f"{pre_check_text}"
             f"**Changed files:** {', '.join(files)}\n\n"
             f"**Diff:**\n```\n{diff}\n```"
             + history
@@ -280,13 +350,20 @@ class PRReviewer:
                     tg(f"🔍 PR #{pr.number} needs human review — {fix_cycles} fix cycles exhausted\n{pr.html_url}")
                 self.stats["skipped"] += 1
                 return True
-            diff = self.get_pr_diff(pr)
+            
             files = self.get_changed_files(pr)
+            pre_check_issues = self._validate_test_presence(pr, files)
+            if pre_check_issues:
+                log.info(f"  ⚠️ Pre-check found {len(pre_check_issues)} test-related issues for PR #{pr.number}")
+            
+            diff = self.get_pr_diff(pr)
             prior_reviews = self._get_prior_reviews(pr)
             MAX_DIFF_CHARS = 100000
             if len(diff) > MAX_DIFF_CHARS:
                 diff = diff[:MAX_DIFF_CHARS] + f"\n\n... [TRUNCATED]"
-            review_message = self._build_review_message(pr, diff, files, prior_reviews=prior_reviews)
+            
+            review_message = self._build_review_message(pr, diff, files, prior_reviews=prior_reviews, pre_check_issues=pre_check_issues)
+            
             model_pass1 = self.router.get("review")
             response1 = self.llm.complete(model_pass1, REVIEW_SYSTEM, review_message)
             self.cost.record(model_pass1, response1, agent="review", action="review_pass1")
@@ -345,12 +422,15 @@ class PRReviewer:
         log.info(f"🔄 FOREMAN reviewer @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
         if not self.cost.check_ceiling():
             return self.stats
-        queue = self.get_review_queue()
-        for pr in queue:
-            self.review_pr(pr)
-            if not self.cost.check_ceiling():
-                break
-            time.sleep(5)
+        try:
+            queue = self.get_review_queue()
+            for pr in queue:
+                self.review_pr(pr)
+                if not self.cost.check_ceiling():
+                    break
+                time.sleep(5)
+        except Exception as e:
+            log.error(f"  ❌ Error in review loop iteration: {e}")
         log.info(f"📊 Stats: {self.stats}")
         log.info(f"💰 {self.cost.summary()}")
         return self.stats
