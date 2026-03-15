@@ -252,6 +252,21 @@ Break the work into concrete subtasks:
 - [ ] Subtask 2
 (minimum 2 subtasks)
 
+## Tests
+Provide concrete definition-of-done via pytest stubs.
+Include at least two stubs: one happy path and one edge/failure case.
+Use Given/When/Then comments inside the stubs.
+Generated tests must be designed to run with `pytest` using mocks/fixtures for external boundaries (GitHub API, LLMs).
+
+Example format:
+```python
+def test_example_happy_path():
+    # Given: [setup]
+    # When: [action]
+    # Then: [assertion]
+    pass
+```
+
 ## Complexity Estimate
 - T-shirt size: XS / S / M / L / XL
 - Estimated API cost: low / medium / high
@@ -260,6 +275,7 @@ Rules:
 - Keep the original intent but make it precise and actionable
 - If the original is vague, make reasonable assumptions and state them
 - Title should be imperative: "Add X", "Fix Y", "Implement Z"
+- Every refined issue MUST include a non-empty `## Tests` section with at least two pytest stubs.
 - Be concise. No filler. Every word earns its place.
 """
 
@@ -398,6 +414,12 @@ class ForemanAgent:
                 return False
 
             refined_body = response.text
+
+            # Validation for mandatory tests section
+            if "## Tests" not in refined_body or refined_body.count("def test_") < 2:
+                log.error(f"  ❌ Refinement for #{issue.number} failed validation: missing mandatory '## Tests' section or sufficient stubs.")
+                self.stats["failed"] += 1
+                return False
 
             # Extract a better title — route to title_gen (usually cheapest model)
             title_response = self._complete(
