@@ -24,7 +24,7 @@ import logging
 import argparse
 from datetime import datetime, timezone
 
-from github import Github
+from github import Github, GithubException
 from llm_client import LLMClient, ModelRouter
 from cost_monitor import CostTracker, print_daily_summary
 from telegram_notifier import notify as tg
@@ -82,6 +82,19 @@ Rules:
 - If a suggested fix is provided verbatim in the review, use it as the template
   and apply the same pattern everywhere it is needed in the file.
 - Do NOT "clean up" or "improve" anything beyond fixing the identified issues.
+"""
+
+
+CREATE_TEST_SYSTEM = """You are FOREMAN's test generator. You receive a Python source file that needs tests written for it.
+
+Your job: output the COMPLETE content of a new pytest test file.
+
+Rules:
+- Output ONLY valid Python source code. No markdown fences. No explanation.
+- Use pytest conventions: test functions named test_*, fixtures where appropriate.
+- Import the module under test correctly at the top.
+- Cover happy paths, edge cases, and error conditions.
+- Keep tests clear and self-documenting.
 """
 
 
@@ -359,6 +372,28 @@ class FixAgent:
                 pass
             tg(f"❌ Auto-merge failed for PR #{pr.number}: {e}\n{pr.html_url}")
 
+    def _resolve_test_globs(self, affected_files: list[str], pr) -> list[str]:
+        """Expand glob test patterns (e.g. test_*.py) into concrete paths from PR source files."""
+        concrete = [f for f in affected_files if '*' not in f and '?' not in f]
+        has_test_glob = any('*' in f or '?' in f for f in affected_files)
+        if not has_test_glob:
+            return affected_files
+        existing = set(concrete)
+        for pr_file in pr.get_files():
+            fname = pr_file.filename
+            if not fname.endswith('.py'):
+                continue
+            basename = fname.split('/')[-1]
+            if basename.startswith('test_'):
+                continue
+            dirpart = '/'.join(fname.split('/')[:-1])
+            test_name = f"test_{basename}"
+            test_path = f"{dirpart}/{test_name}" if dirpart else test_name
+            if test_path not in existing:
+                concrete.append(test_path)
+                existing.add(test_path)
+        return concrete
+
     def fix_pr(self, pr) -> bool:
         """Apply fixes to a PR based on the latest FOREMAN review."""
         log.info(f"🛠️ Fixing PR #{pr.number}: {pr.title}")
@@ -424,6 +459,7 @@ class FixAgent:
 
         review_body = all_reviews[-1]
         affected_files = self._parse_affected_files(review_body)
+        affected_files = self._resolve_test_globs(affected_files, pr)
         if not affected_files:
             log.warning(f"  ⚠️ Could not parse affected files from review — skipping")
             self.stats["skipped"] += 1
@@ -461,12 +497,68 @@ class FixAgent:
                     break
 
                 # Get current file content from PR branch
+                file_sha = None
+                is_new_file = False
+                current_content = None
                 try:
                     contents = self.repo.get_contents(filepath, ref=branch)
                     current_content = contents.decoded_content.decode("utf-8")
                     file_sha = contents.sha
+                except GithubException as e:
+                    basename = filepath.split('/')[-1]
+                    if e.status == 404 and filepath.endswith('.py') and basename.startswith('test_'):
+                        log.info(f"  📝 {filepath} not found — switching to create flow")
+                        is_new_file = True
+                    else:
+                        log.warning(f"  ⚠️ Could not read {filepath} from branch {branch}: {e}")
+                        continue
                 except Exception as e:
                     log.warning(f"  ⚠️ Could not read {filepath} from branch {branch}: {e}")
+                    continue
+
+                # Create flow: generate full test file when it doesn't exist yet
+                if is_new_file:
+                    source_basename = filepath.split('/')[-1].replace('test_', '', 1)
+                    source_dir = '/'.join(filepath.split('/')[:-1])
+                    source_path = f"{source_dir}/{source_basename}" if source_dir else source_basename
+                    source_context = ""
+                    try:
+                        src_contents = self.repo.get_contents(source_path, ref=branch)
+                        source_context = src_contents.decoded_content.decode("utf-8")
+                    except Exception:
+                        log.warning(f"  ⚠️ Could not read source file {source_path} for test generation context")
+                    model = self.router.get("fix")
+                    log.info(f"  🧠 Generating new test file: {filepath}")
+                    create_prompt = (
+                        f"## Source file: {source_path}\n\n```python\n{source_context}\n```\n\n"
+                        f"## Review requirement\n\n{review_body}\n\n"
+                        f"Generate the complete content for `{filepath}`."
+                    ) if source_context else (
+                        f"## Review requirement\n\n{review_body}\n\n"
+                        f"Generate the complete content for `{filepath}`."
+                    )
+                    response = self.llm.complete(
+                        model=model,
+                        system=CREATE_TEST_SYSTEM,
+                        message=create_prompt,
+                        max_tokens=None,
+                    )
+                    self.cost.record(model, response, agent="fixer", action="fix")
+                    log.info(f"  💰 LLM Call ({model}): ${getattr(response, 'cost', 0):.4f}")
+                    new_content = response.text.strip()
+                    if new_content.startswith("```"):
+                        lines = new_content.splitlines()
+                        lines = lines[1:]
+                        if lines and lines[-1].strip() == "```":
+                            lines = lines[:-1]
+                        new_content = "\n".join(lines).strip()
+                    try:
+                        ast.parse(new_content)
+                    except SyntaxError as e:
+                        log.error(f"  ❌ Syntax error in generated test file {filepath}: {e}")
+                        self.stats["failed"] += 1
+                        continue
+                    fixes_ready.append((filepath, new_content, None))  # None sha = create
                     continue
 
                 # Build full review history for this file
@@ -547,15 +639,33 @@ class FixAgent:
             # Push all collected fixes
             for filepath, patched, file_sha in fixes_ready:
                 if not self.dry_run:
-                    self.repo.update_file(
-                        filepath,
-                        f"fix: address review comments in {filepath}",
-                        patched,
-                        file_sha,
-                        branch=branch,
-                    )
-                    log.info(f"  🚀 Pushed fix for {filepath}")
-                    fixes_applied.append(filepath)
+                    try:
+                        if file_sha is None:
+                            self.repo.create_file(
+                                filepath,
+                                f"feat: add missing test file {filepath}",
+                                patched,
+                                branch=branch,
+                            )
+                        else:
+                            self.repo.update_file(
+                                filepath,
+                                f"fix: address review comments in {filepath}",
+                                patched,
+                                file_sha,
+                                branch=branch,
+                            )
+                        log.info(f"  🚀 Pushed fix for {filepath}")
+                        fixes_applied.append(filepath)
+                    except GithubException as e:
+                        if e.status in (403, 422):
+                            log.error(f"  ❌ Cannot write {filepath} (HTTP {e.status}): {e}")
+                            try:
+                                pr.add_to_labels(self.repo.get_label(LABEL_NEEDS_HUMAN))
+                            except Exception:
+                                pass
+                        else:
+                            raise
                 else:
                     log.info(f"  🚧 [DRY RUN] Would push fix for {filepath}")
 
