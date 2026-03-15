@@ -2,28 +2,31 @@
 
 ## Mission
 
-Build a self-sustaining autonomous agent system that manages its own development
-pipeline. It refines vague tasks into actionable specs, generates new tasks when
-the pipeline runs dry, and eventually implements them — all with human oversight
-at critical checkpoints.
+FOREMAN is a self-growing software system. Like a plant, it only needs a daily
+budget to run. It decides what to work on, writes the code, reviews it, fixes it,
+and ships it — on its own.
+
+The human role is: set the budget, read the Telegram updates, occasionally redirect
+via chat. That's it.
 
 The system bootstraps itself: it creates, refines, and works on the very tasks
 that define how to build... itself.
 
 ## Principles
 
-1. **Non-destructive by default** — Never modify existing issues. Create new ones,
-   tag originals as `deprecated`. Every action is reversible.
-2. **Human-in-the-loop where it matters** — Generated tasks (`draft`) require human
-   approval before entering the pipeline. Refined tasks can be reviewed but flow
-   automatically.
+1. **Budget is the throttle** — The daily API spend ceiling is the primary human
+   control surface. Everything else runs autonomously within that limit.
+2. **Minimal human surface** — The only justified human touchpoints are: (a) setting
+   direction via VISION.md or Telegram, (b) emergency override. Routine approvals
+   are a failure mode, not a feature.
 3. **Cost-aware** — Track API spend per agent per session. Route to cheapest model
-   that can handle the task (Opus for strategy, Sonnet for coding, Haiku for
-   mechanical work).
+   that can handle the task.
 4. **Bootstrap-first** — The system builds itself. Every feature ships through the
    pipeline it creates.
 5. **Auditable** — Every issue links to its origin. Every agent action is logged.
    The full history is reconstructable from GitHub Issues alone.
+6. **Non-destructive by default** — Never modify existing issues. Create new ones,
+   tag originals as `deprecated`. Every action is reversible.
 
 ## Architecture
 
@@ -141,88 +144,61 @@ Filtering convention:
 
 ## Safety Rails
 
-- **Infinite loop guard**: Never process issues labeled `auto-refined`,
-  `refined-out`, or `draft`. Only touch `needs-refinement`.
-- **Autonomous by design**: Agents run unattended in cloud containers.
-  No permission prompts, no sandboxes. Safety comes from code-level
-  guardrails, not human approval on each action.
-- **Brainstorm throttle**: Max 5 draft issues per brainstorm cycle. Pause
-  and notify human via Telegram after generating.
-- **Cost ceiling**: Hard stop at $X/day (configurable). Agent parks itself
-  and alerts human.
-- **Duplicate detection**: Before creating a draft, check similarity against
-  all open issues. Skip if >80% semantic match.
-- **Rate limiting**: Minimum 30s between API calls. Backoff on 429s.
-- **PR review safety**: Reviewer never auto-merges. Posts comments only.
-  Humans merge.
+- **Cost ceiling**: Hard stop at configurable daily limit. Agent parks itself
+  and alerts via Telegram. This is the primary safety control.
+- **Infinite loop guard**: Agents only touch issues in their designated label state.
+  No agent processes its own output label.
+- **Syntax check before commit**: All Python files validated with `ast.parse()`
+  before being pushed to a branch.
+- **Fix cycle cap**: Fix agent stops after N review rounds (default 5) and
+  escalates with `needs-human` label.
+- **Auto-merge threshold**: Only merge when review confidence > threshold AND
+  zero open CRITICAL issues. When in doubt, escalate.
+- **Duplicate detection**: Before creating a draft, check semantic similarity
+  against all open issues. Skip if match > threshold.
+- **Brainstorm throttle**: Max N draft issues per cycle. Hard stop when
+  open issue count exceeds ceiling.
+- **Telegram override**: Human can pause, redirect, or veto any action via Brain.
 
 ## Roadmap
 
-### Phase 1 — Seed (CURRENT)
-> Goal: Minimal viable loop that can refine and generate its own tasks.
+### Phase 1 — Seed ✅ DONE
+Seed agent, refine loop, brainstorm grounded in VISION.md, GitHub Issues integration,
+Telegram notifications, cost ceiling, duplicate detection.
 
-- [ ] VISION.md (this file)
-- [ ] Seed agent script — poll / refine / brainstorm loop
-- [ ] PR review agent — watches PRs, posts code review comments
-- [ ] GitHub Issues integration (create, label, close-with-link)
-- [ ] Brainstorm mode grounded in VISION.md
-- [ ] Basic Telegram bot — status, pause, resume, queue
-- [ ] Wire dashboard to real agent state
-- [ ] Deploy to Railway
-- [ ] Agent processes its own Phase 1 tasks
+### Phase 2 — Implementation ✅ DONE
+Implement agent (reads refined ticket → writes code → opens PR), review agent
+(posts structured review), fix agent (reads review → pushes search/replace patches),
+Foreman Brain (Telegram bot with Claude + GitHub tools for conversational control).
 
-### Phase 2 — Implementation Agent
-> Goal: The system writes code, not just tickets.
+### Phase 3 — Close the Loop (CURRENT)
+> Goal: Remove the two remaining manual steps so the system runs fully on budget alone.
 
-- [ ] Implementation agent — reads refined ticket, writes code, opens PR
-  - Clone repo → create branch → implement based on acceptance criteria
-  - Run tests/lint before pushing
-  - Open PR with description linking back to issue
-  - Review agent auto-reviews the PR
-  - Human merges (for now)
-- [ ] Model routing (foreman pattern)
-  - Opus: planning step (read ticket → decide approach → file list)
-  - Sonnet: coding step (write the actual code)
-  - Haiku: mechanical steps (commit messages, PR descriptions)
-- [ ] Feedback loop — track what gets changed in code review
-- [ ] Start with easy targets: docs, configs, tests, README updates
-- [ ] Graduate to real code changes as confidence builds
+**Gap 1: Auto-promote refined issues to `ready`**
+- After refinement, issues sit at `auto-refined` waiting for a human to label them `ready`
+- Seed agent (or a scheduler) should auto-promote after a confidence/age threshold
+- Human can still block via Telegram or by adding a `hold` label
 
-### Phase 3 — Brainstorm Conversations
-> Goal: Multi-turn strategic planning via Telegram, not one-shot ticket generation.
+**Gap 2: Auto-merge with confidence scoring**
+- After fix agent runs, a PR with no CRITICAL/IMPORTANT issues and passing syntax checks
+  should merge itself
+- Review agent needs to emit a machine-readable confidence score
+- Auto-merge only when score > threshold AND no open CRITICAL issues
 
-- [ ] Telegram brainstorm mode — conversational, not fire-and-forget
-  - Agent proposes direction based on VISION.md + current state
-  - Human pushes back, adds context, redirects
-  - Agent refines the plan across multiple exchanges
-  - Final output: full implementation plan → decomposed into tickets
-  - Tickets auto-created as "draft" for human approval
-- [ ] Session persistence — brainstorm can span hours/days
-- [ ] Context loading — agent reads repo state, recent PRs, recent
-  issues, cost history before starting a brainstorm
-- [ ] Plan templates — architecture decisions, feature specs, refactors
-- [ ] "Think harder" mode — route brainstorm to Opus for deeper reasoning
+**Gap 3: Backlog hygiene agent**
+- Periodically audit open issues against merged PRs and current codebase
+- Close issues that have already been implemented
+- Flag issues that are now redundant given what was built
+- Prevents backlog from rotting as the system grows
 
-### Phase 4 — Multi-Agent Orchestration
-> Goal: Parallel specialized agents managed by a foreman.
+### Phase 4 — Scale & Observe
+> Goal: The system runs 24/7 with a daily budget, visible health metrics.
 
-- [ ] Foreman orchestrator — routes tasks to specialist agents
-- [ ] Parallel execution with conflict detection (file-level locking)
-- [ ] Agent specialization (refiner, implementer, reviewer, tester)
-- [ ] Cross-agent communication protocol
-- [ ] Scaling rules (spin up/down agents based on queue depth)
-- [ ] Cost tracking dashboard (per agent, per session, per model)
-- [ ] Prompt versioning — track which prompts produce best results
-
-### Phase 5 — Production
-> Goal: Battle-tested system ready for real project use.
-
-- [ ] Migrate to Jira + GitLab integration for Robotiq use
+- [ ] Deploy to Railway/Fly.io (persistent process, not GitHub Actions)
+- [ ] Cost dashboard — per agent, per day, trend over time
+- [ ] Velocity metrics — issues closed per week, PR cycle time
+- [ ] Budget auto-scaling — spend more on days with big PRs, less on idle days
 - [ ] Multi-repo support
-- [ ] Team onboarding (other devs interact via Telegram/dashboard)
-- [ ] Security audit (API key management, permissions)
-- [ ] Metrics and reporting (velocity, quality scores, cost efficiency)
-- [ ] GCP cost monitoring with auto-shutdown
 
 ## Agent Evolution Path
 
@@ -256,9 +232,9 @@ just routing to the right capability at the right time.
 
 ## Context
 
-This project is a personal POC built by Jordan. If successful, the pattern
-could be adapted for use at Robotiq (Jira + GitLab) for automating the
-helpdesk → ticket → resolution pipeline for palletizer installations.
+Personal POC built by Jordan. The goal is a system that grows like a plant:
+given a daily budget, it decides what to build, builds it, and ships it.
+The human sets direction (this file + Telegram) and watches it grow.
 
-The long-term vision is an autonomous development team that a single human
-can supervise via Telegram while doing other things (like parenting a toddler).
+If successful, the pattern could be adapted for Robotiq (Jira + GitLab) to
+automate the helpdesk → ticket → resolution pipeline for palletizer installations.
