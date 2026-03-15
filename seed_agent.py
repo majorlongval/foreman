@@ -64,6 +64,8 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("foreman")
+# Suppress internal LiteLLM and Wrapper logs
+logging.getLogger("litellm").setLevel(logging.WARNING)
 
 # ─── Cost Tracking & LLM ─────────────────────────────────────
 
@@ -77,16 +79,20 @@ from agent_state import agent_state_manager as state, AgentState
 
 def load_vision() -> str:
     """Load VISION.md from repo root or local fallback."""
-    paths = [
-        Path(__file__).parent / "VISION.md",
-        Path.cwd() / "VISION.md",
-    ]
-    for p in paths:
-        if p.exists():
-            log.info(f"📖 Loaded VISION.md from {p}")
-            return p.read_text()
-    log.warning("⚠️  VISION.md not found, brainstorm mode will be limited")
-    return ""
+    try:
+        paths = [
+            Path(__file__).parent / "VISION.md",
+            Path.cwd() / "VISION.md",
+        ]
+        for p in paths:
+            if p.exists():
+                log.info(f"📖 Loaded VISION.md from {p}")
+                return p.read_text()
+        log.warning("⚠️  VISION.md not found, brainstorm mode will be limited")
+        return ""
+    except Exception as e:
+        log.error(f"Error loading VISION.md: {e}")
+        return ""
 
 
 # ─── GitHub Helpers ──────────────────────────────────────────
@@ -323,17 +329,23 @@ class ForemanAgent:
 
     def _complete(self, task: str, system: str, message: str, max_tokens: int = 2000):
         """Unified completion that routes to the right model and tracks cost."""
-        model = self.router.get(task)
-        response = self.llm.complete(model, system, message, max_tokens)
+        try:
+            model = self.router.get(task)
+            response = self.llm.complete(model, system, message, max_tokens)
 
-        # Record in cost tracker (create a duck-typed usage object)
-        class _Usage:
-            def __init__(self, inp, out):
-                self.input_tokens = inp
-                self.output_tokens = out
-        self.cost.record(model, _Usage(response.input_tokens, response.output_tokens),
-                         agent="seed", action=task)
-        return response
+            # Record in cost tracker (create a duck-typed usage object)
+            class _Usage:
+                def __init__(self, inp, out):
+                    self.input_tokens = inp
+                    self.output_tokens = out
+            
+            usage = _Usage(response.input_tokens, response.output_tokens)
+            cost_value = self.cost.record(model, usage, agent="seed", action=task)
+            log.info(f"  💰 Cost: ${cost_value:.4f} | Model: {model}")
+            return response
+        except Exception as e:
+            log.error(f"Error in LLM completion: {e}")
+            raise
 
     def auto_promote_refined_issues(self) -> int:
         """Find 'auto-refined' issues older than threshold and promote to 'ready'."""
@@ -437,6 +449,7 @@ class ForemanAgent:
                 max_tokens=500,
             )
             refined_title = title_response.text.strip().strip('"').strip("'")
+            log.info(f"  ✨ Refined title: {refined_title}")
 
             self.github.create_refined_issue(issue, refined_body, refined_title)
             self.stats["refined"] += 1
@@ -457,19 +470,20 @@ class ForemanAgent:
             return []
 
         # Gather context
-        open_issues = self.github.get_all_open_issues()
-        closed_issues = self.github.get_closed_issues(30)
-
-        open_summary = "\n".join(
-            f"- #{i.number} [{', '.join(l.name for l in i.labels)}] {i.title}"
-            for i in open_issues
-        )
-        closed_summary = "\n".join(
-            f"- #{i.number} [DONE] {i.title}"
-            for i in closed_issues
-        )
-
         try:
+            open_issues = self.github.get_all_open_issues()
+            closed_issues = self.github.get_closed_issues(30)
+            log.info(f"  📊 Brainstorm context: {len(open_issues)} open issues, {len(closed_issues)} closed issues")
+
+            open_summary = "\n".join(
+                f"- #{i.number} [{', '.join(l.name for l in i.labels)}] {i.title}"
+                for i in open_issues
+            )
+            closed_summary = "\n".join(
+                f"- #{i.number} [DONE] {i.title}"
+                for i in closed_issues
+            )
+
             response = self._complete(
                 task="brainstorm",
                 system=BRAINSTORM_SYSTEM.format(max_drafts=BRAINSTORM_MAX_DRAFTS),
