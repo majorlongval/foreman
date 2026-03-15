@@ -36,9 +36,12 @@ REPO_NAME = os.environ.get("FOREMAN_REPO", "")
 ROUTING_PROFILE = os.environ.get("ROUTING_PROFILE", "balanced")
 COST_CEILING_USD = float(os.environ.get("FIX_COST_CEILING_USD", "1.0"))
 
+AUTO_MERGE_ENABLED = os.environ.get("AUTO_MERGE_ENABLED", "false").lower() == "true"
+
 LABEL_FIXING = "fixing"
 LABEL_NEEDS_HUMAN = "needs-human"
 LABEL_REVIEWED = "reviewed"
+LABEL_NO_AUTO_MERGE = "no-auto-merge"
 
 BOT_SIGNATURE = "\n\n---\n_Review by FOREMAN 🤖_"
 FIX_SIGNATURE = "\n\n---\n_Fix by FOREMAN 🔧_"
@@ -193,20 +196,35 @@ class FixAgent:
         needed = {
             LABEL_FIXING: "fbca04",
             LABEL_NEEDS_HUMAN: "d93f0b",
+            LABEL_NO_AUTO_MERGE: "ededed",
         }
         for name, color in needed.items():
             if name not in existing:
                 if not self.dry_run:
-                    self.repo.create_label(name=name, color=color)
+                    try:
+                        self.repo.create_label(name=name, color=color)
+                    except Exception as e:
+                        log.warning(f"  Could not create label {name}: {e}")
 
     def _get_all_foreman_reviews(self, pr) -> list[str]:
         """Get all FOREMAN review bodies with issues, oldest first."""
         return [
             r.body for r in pr.get_reviews()
-            if r.body and BOT_SIGNATURE.strip() in r.body
+            if r.body and "Review by FOREMAN" in r.body
             and ("[CRITICAL]" in r.body.upper() or "[IMPORTANT]" in r.body.upper())
         ]
 
+    def _get_latest_foreman_review(self, pr) -> str | None:
+        """Get the body of the most recent FOREMAN review."""
+        try:
+            reviews = [
+                r.body for r in pr.get_reviews()
+                if r.body and "Review by FOREMAN" in r.body
+            ]
+            return reviews[-1] if reviews else None
+        except Exception as e:
+            log.warning(f"  Failed to fetch reviews for PR #{pr.number}: {e}")
+            return None
     def _criticals_overlap(self, body1: str, body2: str) -> bool:
         """Return True if two reviews share most of the same CRITICAL issue descriptions.
 
@@ -228,7 +246,7 @@ class FixAgent:
         """Count FOREMAN review cycles on this PR."""
         count = 0
         for review in pr.get_reviews():
-            if review.body and BOT_SIGNATURE.strip() in review.body:
+            if review.body and "Review by FOREMAN" in review.body:
                 count += 1
         return count
 
@@ -258,9 +276,105 @@ class FixAgent:
                 relevant.append(line)
         return '\n'.join(relevant) if relevant else review_body
 
+    def _is_approve_ready(self, pr) -> bool:
+        """Check if PR meets all criteria for auto-merge."""
+        if not AUTO_MERGE_ENABLED:
+            return False
+
+        labels = {l.name for l in pr.labels}
+        if LABEL_NO_AUTO_MERGE in labels:
+            log.info(f"  Auto-merge opted out via label for PR #{pr.number}")
+            return False
+
+        # Refresh mergeable status
+        if not self.dry_run:
+            try:
+                pr.update()
+            except Exception as e:
+                log.warning(f"  Failed to update PR data: {e}")
+
+        if pr.mergeable is False:
+            log.warning(f"  PR #{pr.number} is not mergeable (conflicts)")
+            return False
+
+        # None means GitHub is still calculating — wait, don't fail
+        if pr.mergeable is not True:
+            log.info(f"  PR #{pr.number} mergeable status is {pr.mergeable} (waiting for calculation)")
+            return False
+
+        # Don't attempt merge while CI checks are still running — would throw and trigger needs-human
+        if pr.mergeable_state in ("pending", "unknown", None):
+            log.info(f"  PR #{pr.number} mergeable_state is '{pr.mergeable_state}' — waiting for checks")
+            return False
+
+        cycles = self._count_fix_cycles(pr)
+        if cycles > MAX_FIX_CYCLES:
+            log.warning(f"  Fix cycle count ({cycles}) exceeds MAX_FIX_CYCLES ({MAX_FIX_CYCLES})")
+            raise Exception(f"Fix cycle count ({cycles}) exceeds MAX_FIX_CYCLES ({MAX_FIX_CYCLES})")
+
+        latest_review = self._get_latest_foreman_review(pr)
+        if not latest_review:
+            return False
+            
+        if '"verdict": "APPROVE"' not in latest_review:
+            return False
+
+        # Ensure no remaining critical issues in the latest review body
+        if "[CRITICAL]" in latest_review.upper() or "[IMPORTANT]" in latest_review.upper():
+            log.warning(f"  PR #{pr.number} has APPROVE verdict but still lists critical issues")
+            raise Exception("PR has APPROVE verdict but still lists critical/important issues")
+
+        return True
+
+    def _try_auto_merge(self, pr):
+        """Attempt to squash-merge the PR if eligible."""
+        try:
+            if not self._is_approve_ready(pr):
+                return
+
+            log.info(f"  PR #{pr.number} is ready for auto-merge")
+            
+            if self.dry_run:
+                log.info(f"  [DRY RUN] Would auto-merge PR #{pr.number}")
+                return
+
+            status = pr.merge(
+                merge_method="squash",
+                commit_title=f"auto-merge PR #{pr.number}: {pr.title}",
+                commit_message=f"Merged automatically by FOREMAN after approval.{FIX_SIGNATURE}"
+            )
+            if not status.merged:
+                raise Exception(f"GitHub API returned merged=False: {getattr(status, 'message', 'unknown')}")
+            log.info(f"  PR #{pr.number} merged successfully")
+            tg(f"✅ Auto-merged PR #{pr.number}: {pr.title}\n{pr.html_url}")
+
+        except Exception as e:
+            log.error(f"  Auto-merge failed for PR #{pr.number}: {e}")
+            try:
+                if not self.dry_run:
+                    pr.add_to_labels(LABEL_NEEDS_HUMAN)
+            except Exception:
+                pass
+            tg(f"❌ Auto-merge failed for PR #{pr.number}: {e}\n{pr.html_url}")
+
     def fix_pr(self, pr) -> bool:
         """Apply fixes to a PR based on the latest FOREMAN review."""
         log.info(f"Fixing PR #{pr.number}: {pr.title}")
+
+        # Check for auto-merge first
+        latest_review = self._get_latest_foreman_review(pr)
+        if latest_review:
+            if '"verdict": "APPROVE"' in latest_review:
+                log.info(f"  Latest review is APPROVE — checking auto-merge")
+                self._try_auto_merge(pr)
+                self.stats["skipped"] += 1
+                return True
+            
+            # Prevent infinite waste loop: skip if the latest review has no actionable issues
+            if "[CRITICAL]" not in latest_review.upper() and "[IMPORTANT]" not in latest_review.upper():
+                log.info(f"  Latest review has no actionable issues — skipping")
+                self.stats["skipped"] += 1
+                return True
 
         # Check cycle count
         cycles = self._count_fix_cycles(pr)
@@ -276,6 +390,8 @@ class FixAgent:
             self.stats["skipped"] += 1
             return True
 
+        # Skip if the latest verdict is APPROVE (redundant but safe)
+        if '"verdict": "APPROVE"' in all_reviews[-1]:
         # Convergence check: if same criticals appear two rounds in a row, escalate
         if len(all_reviews) >= 2 and self._criticals_overlap(all_reviews[-1], all_reviews[-2]):
             log.warning(f"  Fix agent stalled — same criticals in rounds {len(all_reviews)-1} and {len(all_reviews)}")
@@ -300,6 +416,8 @@ class FixAgent:
             log.info(f"  Latest review is APPROVE — skipping fix")
             self.stats["skipped"] += 1
             return True
+
+        review_body = all_reviews[-1]
         affected_files = self._parse_affected_files(review_body)
         if not affected_files:
             log.warning(f"  Could not parse affected files from review — skipping")
@@ -459,7 +577,6 @@ class FixAgent:
 
         finally:
             # Ensure fixing label is removed even on exception
-            # (normal path removes it before pushing; this is the safety net)
             if not self.dry_run:
                 try:
                     pr.remove_from_labels(self.repo.get_label(LABEL_FIXING))
@@ -467,7 +584,7 @@ class FixAgent:
                     pass
 
     def get_fixable_prs(self) -> list:
-        """Get open PRs that have FOREMAN reviews with issues."""
+        """Get open PRs that have FOREMAN reviews."""
         pulls = self.repo.get_pulls(state="open", sort="created", direction="asc")
         fixable = []
         for pr in pulls:
@@ -476,10 +593,8 @@ class FixAgent:
                 continue  # Already being fixed
             if LABEL_NEEDS_HUMAN in pr_labels:
                 continue  # Escalated
-            # Check for a FOREMAN review with issues
-            reviews = [r for r in pr.get_reviews() if r.body and "Review by FOREMAN" in r.body]
-            review = reviews[-1] if reviews else None
-            if review:
+            # Check for a FOREMAN review
+            if self._get_latest_foreman_review(pr):
                 fixable.append(pr)
         return fixable
 
@@ -492,13 +607,19 @@ class FixAgent:
             return self.stats
 
         if pr_number:
-            pr = self.repo.get_pull(pr_number)
-            self.fix_pr(pr)
+            try:
+                pr = self.repo.get_pull(pr_number)
+                self.fix_pr(pr)
+            except Exception as e:
+                log.error(f"Failed to process PR #{pr_number}: {e}")
         else:
             queue = self.get_fixable_prs()
-            log.info(f"Fixable PRs: {len(queue)}")
+            log.info(f"Eligible PRs: {len(queue)}")
             for pr in queue:
-                self.fix_pr(pr)
+                try:
+                    self.fix_pr(pr)
+                except Exception as e:
+                    log.error(f"Error processing PR #{pr.number}: {e}")
                 if not self.cost.check_ceiling():
                     break
 
