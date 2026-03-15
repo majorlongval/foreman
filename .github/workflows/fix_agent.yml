@@ -10,7 +10,7 @@ on:
         required: false
 
 concurrency:
-  group: fix-agent
+  group: foreman-pipeline
   cancel-in-progress: false
 
 jobs:
