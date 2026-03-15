@@ -2,6 +2,7 @@ anthropic>=0.40.0
 PyGithub>=2.1.0
 python-telegram-bot>=21.0
 litellm>=1.52.0
+streamlit>=1.30.0
 
 # Optional providers — install only what you need:
 # pip install google-genai     # for Gemini
