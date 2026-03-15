@@ -1,5 +1,5 @@
 """
-FOREMAN Fix Agent — v0.1
+FOREMAN Fix Agent — v0.2
 Reads review comments from FOREMAN's code reviews, generates minimal fixes,
 and pushes them to the PR branch.
 
@@ -19,12 +19,13 @@ import json
 import os
 import re
 import sys
+import time
 
 import logging
 import argparse
 from datetime import datetime, timezone
 
-from github import Github
+from github import Github, GithubException
 from llm_client import LLMClient, ModelRouter
 from cost_monitor import CostTracker, print_daily_summary
 from telegram_notifier import notify as tg
@@ -34,7 +35,7 @@ from telegram_notifier import notify as tg
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("FOREMAN_REPO", "")
 ROUTING_PROFILE = os.environ.get("ROUTING_PROFILE", "balanced")
-COST_CEILING_USD = float(os.environ.get("FIX_COST_CEILING_USD", "1.0"))
+COST_CEILING_USD = float(os.environ.get("FIX_COST_CEILING_USD", "2.0"))
 
 LABEL_FIXING = "fixing"
 LABEL_NEEDS_HUMAN = "needs-human"
@@ -132,14 +133,7 @@ def apply_patches(content: str, patches: list) -> tuple[str, list[str]]:
 
 
 def check_scope(original: str, patched: str, review_body: str) -> list[str]:
-    """Warn if patches touch lines not mentioned in the review.
-
-    Returns a list of warning strings. Warnings are informational only —
-    callers should log them but not retry or block on them.
-    Expected noise: the review format doesn't guarantee line ranges for all
-    issues, so some spurious warnings are normal.
-    """
-    # Extract mentioned line ranges from review body: `filename.py:10-20` or `filename.py:10`
+    """Warn if patches touch lines not mentioned in the review."""
     mentioned_ranges = []
     for match in re.finditer(r'`[^`]+\.\w+:(\d+)(?:-(\d+))?`', review_body):
         start = int(match.group(1))
@@ -147,9 +141,8 @@ def check_scope(original: str, patched: str, review_body: str) -> list[str]:
         mentioned_ranges.append((start, end))
 
     if not mentioned_ranges:
-        return []  # No ranges to check against
+        return []
 
-    # Find changed line numbers (1-indexed, in original numbering)
     changed_lines = set()
     orig_line = 0
     for line in difflib.unified_diff(original.splitlines(), patched.splitlines(), lineterm=""):
@@ -158,7 +151,7 @@ def check_scope(original: str, patched: str, review_body: str) -> list[str]:
             if m:
                 orig_line = int(m.group(1)) - 1
         elif line.startswith("---") or line.startswith("+++"):
-            pass  # file header lines — don't advance the line counter
+            pass
         elif line.startswith("-"):
             orig_line += 1
             changed_lines.add(orig_line)
@@ -199,20 +192,50 @@ class FixAgent:
                 if not self.dry_run:
                     self.repo.create_label(name=name, color=color)
 
-    def _get_all_foreman_reviews(self, pr) -> list[str]:
-        """Get all FOREMAN review bodies with issues, oldest first."""
+    def _parse_review_data(self, review_body: str) -> dict:
+        """Extract structured review data from the JSON block in the review body."""
+        defaults = {
+            "verdict": "COMMENT",
+            "critical_count": 0,
+            "important_count": 0,
+            "suggestion_count": 0,
+            "affected_files": [],
+        }
+        try:
+            marker = "## Review Data"
+            idx = review_body.find(marker)
+            if idx == -1:
+                return defaults
+            after_marker = review_body[idx + len(marker):]
+            json_start = after_marker.find("```json")
+            if json_start == -1:
+                return defaults
+            json_content_start = after_marker.find("\n", json_start) + 1
+            json_end = after_marker.find("```", json_content_start)
+            if json_end == -1:
+                return defaults
+            json_str = after_marker[json_content_start:json_end].strip()
+            data = json.loads(json_str)
+            return {
+                "verdict": data.get("verdict", defaults["verdict"]),
+                "critical_count": int(data.get("critical_count", 0)),
+                "important_count": int(data.get("important_count", 0)),
+                "suggestion_count": int(data.get("suggestion_count", 0)),
+                "affected_files": data.get("affected_files", []),
+            }
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            log.warning(f"Failed to parse review data JSON: {e}")
+            return defaults
+
+    def _get_all_foreman_reviews(self, pr) -> list:
+        """Get all FOREMAN review objects, oldest first."""
         return [
-            r.body for r in pr.get_reviews()
+            r for r in pr.get_reviews()
             if r.body and BOT_SIGNATURE.strip() in r.body
-            and ("[CRITICAL]" in r.body.upper() or "[IMPORTANT]" in r.body.upper())
         ]
 
     def _criticals_overlap(self, body1: str, body2: str) -> bool:
-        """Return True if two reviews share most of the same CRITICAL issue descriptions.
-
-        Used to detect when the fix agent is spinning — applying patches but the
-        reviewer keeps flagging the same problems. Triggers escalation.
-        """
+        """Return True if two reviews share most of the same CRITICAL issue descriptions."""
         def extract_criticals(body):
             return set(re.findall(r'\[CRITICAL\][^\n]*', body, re.IGNORECASE))
 
@@ -221,7 +244,6 @@ class FixAgent:
         if not c1 or not c2:
             return False
         overlap = len(c1 & c2)
-        # Stalled if at least half of current criticals were already in previous round
         return overlap >= max(1, len(c1) // 2)
 
     def _count_fix_cycles(self, pr) -> int:
@@ -232,221 +254,169 @@ class FixAgent:
                 count += 1
         return count
 
-    # File extensions we expect in review comments
-    _FILE_EXTENSIONS = ('.py', '.yml', '.yaml', '.json', '.toml', '.md', '.txt', '.cfg', '.ini', '.sh')
-
-    def _parse_affected_files(self, review_body: str) -> list[str]:
-        """Extract file paths mentioned in review issues."""
-        files = set()
-        # Match patterns like `filename.py:123` or `filename.py:10-20`
-        for match in re.finditer(r'`([^`]+\.\w+)(?::\d+(?:-\d+)?)?`', review_body):
-            filepath = match.group(1)
-            # Require a known file extension to avoid false positives like `response.text`
-            if any(filepath.endswith(ext) for ext in self._FILE_EXTENSIONS):
-                files.add(filepath)
-        return list(files)
-
     def _extract_issues_for_file(self, review_body: str, filepath: str) -> str:
-        """Extract review issues relevant to a specific file."""
+        """Extract review issues relevant to a specific file, including code blocks."""
         lines = review_body.split('\n')
         relevant = []
+        is_collecting = False
+        
         for line in lines:
-            if filepath in line and ('CRITICAL' in line.upper() or 'IMPORTANT' in line.upper()):
+            if f"`{filepath}" in line and ('CRITICAL' in line.upper() or 'IMPORTANT' in line.upper()):
+                is_collecting = True
                 relevant.append(line)
-                # Include the next line if it's a continuation (indented)
-            elif relevant and line.startswith('  ') and not line.startswith('- **['):
-                relevant.append(line)
-        return '\n'.join(relevant) if relevant else review_body
+            elif is_collecting:
+                if line.startswith('- **[') and f"`{filepath}" not in line:
+                    is_collecting = False
+                elif line.startswith('## Verdict') or line.startswith('## Review Data'):
+                    is_collecting = False
+                else:
+                    relevant.append(line)
+                    
+        return '\n'.join(relevant).strip() if relevant else ""
 
     def fix_pr(self, pr) -> bool:
         """Apply fixes to a PR based on the latest FOREMAN review."""
         log.info(f"Fixing PR #{pr.number}: {pr.title}")
 
-        # Check cycle count
-        cycles = self._count_fix_cycles(pr)
-        if cycles >= MAX_FIX_CYCLES:
-            log.info(f"  Max fix cycles ({MAX_FIX_CYCLES}) reached — skipping")
-            self.stats["skipped"] += 1
-            return True
+        try:
+            cycles = self._count_fix_cycles(pr)
+            if cycles >= MAX_FIX_CYCLES:
+                log.info(f"  Max fix cycles ({MAX_FIX_CYCLES}) reached — skipping")
+                self.stats["skipped"] += 1
+                return True
 
-        # Get all reviews with issues
-        all_reviews = self._get_all_foreman_reviews(pr)
-        if not all_reviews:
-            log.info(f"  No actionable FOREMAN review found — skipping")
-            self.stats["skipped"] += 1
-            return True
+            all_reviews = self._get_all_foreman_reviews(pr)
+            if not all_reviews:
+                log.info(f"  No FOREMAN review found — skipping")
+                self.stats["skipped"] += 1
+                return True
 
-        # Convergence check: if same criticals appear two rounds in a row, escalate
-        if len(all_reviews) >= 2 and self._criticals_overlap(all_reviews[-1], all_reviews[-2]):
-            log.warning(f"  Fix agent stalled — same criticals in rounds {len(all_reviews)-1} and {len(all_reviews)}")
+            latest_review = all_reviews[-1]
+            review_data = self._parse_review_data(latest_review.body)
+            
+            if review_data["verdict"] == "APPROVE":
+                log.info(f"  Latest review is APPROVE — skipping fix")
+                self.stats["skipped"] += 1
+                return True
+
+            if review_data["critical_count"] == 0 and review_data["important_count"] == 0:
+                log.info(f"  No critical or important issues — skipping fix")
+                self.stats["skipped"] += 1
+                return True
+
+            # Convergence check
+            if len(all_reviews) >= 2 and self._criticals_overlap(all_reviews[-1].body, all_reviews[-2].body):
+                log.warning(f"  Fix agent stalled — same criticals in rounds {len(all_reviews)-1} and {len(all_reviews)}")
+                if not self.dry_run:
+                    try:
+                        pr.add_to_labels(self.repo.get_label(LABEL_NEEDS_HUMAN))
+                        pr.create_issue_comment(
+                            f"⚠️ Fix agent stalled — the same critical issues were present in rounds "
+                            f"{len(all_reviews)-1} and {len(all_reviews)}. Patches are not converging. "
+                            f"Human intervention needed."
+                            + FIX_SIGNATURE
+                        )
+                        tg(f"⚠️ PR #{pr.number} stalled — fix agent not converging\n{pr.html_url}")
+                    except Exception: pass
+                self.stats["skipped"] += 1
+                return True
+
+            affected_files = review_data["affected_files"]
+            if not affected_files:
+                log.warning(f"  No affected files in review data JSON")
+                self.stats["skipped"] += 1
+                return True
+
+            log.info(f"  Affected files: {affected_files}")
+            branch = pr.head.ref
+
+            # Sync branch
             if not self.dry_run:
                 try:
-                    pr.add_to_labels(self.repo.get_label(LABEL_NEEDS_HUMAN))
-                except Exception:
-                    pass
-                pr.create_issue_comment(
-                    f"⚠️ Fix agent stalled — the same critical issues were present in rounds "
-                    f"{len(all_reviews)-1} and {len(all_reviews)}. Patches are not converging. "
-                    f"Human intervention needed."
-                    + FIX_SIGNATURE
-                )
-                tg(f"⚠️ PR #{pr.number} stalled — fix agent not converging after {len(all_reviews)} rounds\n{pr.html_url}")
-            self.stats["skipped"] += 1
-            return True
+                    self.repo.merge(base=branch, head="main", commit_message=f"Merge main into {branch}")
+                except Exception as e:
+                    log.warning(f"  Sync failed: {e}")
 
-        # Skip if the latest verdict is APPROVE — nothing to fix
-        review_body = all_reviews[-1]
-        if '"verdict": "APPROVE"' in review_body:
-            log.info(f"  Latest review is APPROVE — skipping fix")
-            self.stats["skipped"] += 1
-            return True
-        affected_files = self._parse_affected_files(review_body)
-        if not affected_files:
-            log.warning(f"  Could not parse affected files from review — skipping")
-            self.stats["skipped"] += 1
-            return True
+            # Claim
+            if not self.dry_run:
+                try:
+                    pr.add_to_labels(self.repo.get_label(LABEL_FIXING))
+                except Exception: pass
 
-        log.info(f"  Affected files: {affected_files}")
-
-        branch = pr.head.ref
-
-        # Sync PR branch with main to resolve conflicts
-        if not self.dry_run:
-            try:
-                self.repo.merge(
-                    base=branch,
-                    head="main",
-                    commit_message=f"Merge main into {branch}",
-                )
-                log.info(f"  Merged main into {branch}")
-            except Exception as e:
-                log.warning(f"  Could not merge main into branch: {e}")
-
-        # Claim the PR
-        if not self.dry_run:
-            try:
-                pr.add_to_labels(self.repo.get_label(LABEL_FIXING))
-            except Exception:
-                pass
-
-        fixes_applied = []
-        fixes_ready = []  # (filepath, patched_content, file_sha) — collected before push
-
-        try:
+            fixes_ready = []
             for filepath in affected_files:
-                if not self.cost.check_ceiling():
-                    break
+                if not self.cost.check_ceiling(): break
 
-                # Get current file content from PR branch
                 try:
                     contents = self.repo.get_contents(filepath, ref=branch)
                     current_content = contents.decoded_content.decode("utf-8")
                     file_sha = contents.sha
                 except Exception as e:
-                    log.warning(f"  Could not read {filepath} from branch {branch}: {e}")
+                    log.warning(f"  Could not read {filepath}: {e}")
                     continue
 
-                # Build full review history for this file
+                # Context history
                 history_parts = []
                 for i, rev in enumerate(all_reviews):
-                    issues = self._extract_issues_for_file(rev, filepath)
-                    history_parts.append(f"**Round {i+1}:**\n{issues}")
-                review_history = "\n\n---\n".join(history_parts)
+                    issues = self._extract_issues_for_file(rev.body, filepath)
+                    if issues:
+                        history_parts.append(f"**Round {i+1}:**\n{issues}")
+                
+                if not history_parts:
+                    log.info(f"  No specific issues found for {filepath} in review text")
+                    continue
 
-                # Generate patches — up to 2 attempts
+                review_history = "\n\n---\n".join(history_parts)
                 model = self.router.get("fix")
-                log.info(f"  Generating patches for {filepath} ({len(all_reviews)} review round(s) of context)")
-                prompt = (
-                    f"## Review History\n\n{review_history}\n\n"
-                    f"## Current File: {filepath}\n\n{current_content}"
-                )
+                prompt = f"## Review History\n\n{review_history}\n\n## Current File: {filepath}\n\n{current_content}"
 
                 patched = None
                 for attempt in range(2):
-                    response = self.llm.complete(
-                        model=model,
-                        system=PATCH_SYSTEM,
-                        message=prompt,
-                        max_tokens=None,
-                    )
+                    response = self.llm.complete(model=model, system=PATCH_SYSTEM, message=prompt)
                     self.cost.record(model, response, agent="fixer", action="fix")
-
                     patches = parse_json(response.text)
                     if patches is None:
-                        log.warning(f"  Attempt {attempt+1}: invalid JSON response for {filepath}")
-                        prompt += "\n\nYour previous response was not valid JSON. Output ONLY a JSON array."
+                        prompt += "\n\nResponse was not valid JSON. Use ONLY a JSON array."
                         continue
-
                     patched_content, errors = apply_patches(current_content, patches)
                     if errors:
-                        log.warning(f"  Attempt {attempt+1}: patch errors for {filepath}: {errors}")
-                        prompt += f"\n\nPatch application failed:\n" + "\n".join(errors) + "\nFix your search strings."
+                        prompt += f"\n\nPatch failed:\n" + "\n".join(errors) + "\nFix search strings."
                         continue
-
-                    warnings = check_scope(current_content, patched_content, review_body)
-                    if warnings:
-                        log.warning(f"  Scope warnings for {filepath}: {warnings}")
-
                     if filepath.endswith(".py"):
                         try:
                             ast.parse(patched_content)
                         except SyntaxError as e:
-                            log.warning(f"  Attempt {attempt+1}: syntax error in patched {filepath}: {e}")
-                            prompt += f"\n\nPatched file has syntax error: {e}. Fix it."
+                            prompt += f"\n\nSyntax error: {e}. Fix it."
                             continue
-
                     patched = patched_content
                     break
 
-                if patched is None:
-                    log.error(f"  All patch attempts failed for {filepath} — skipping")
-                    self.stats["failed"] += 1
-                    continue
+                if patched and patched.strip() != current_content.strip():
+                    fixes_ready.append((filepath, patched, file_sha))
 
-                if patched.strip() == current_content.strip():
-                    log.info(f"  No changes needed for {filepath}")
-                    continue
-
-                fixes_ready.append((filepath, patched, file_sha))
-
-            # Release fixing label BEFORE pushing so push-triggered review can run
             if not self.dry_run:
                 try:
                     pr.remove_from_labels(self.repo.get_label(LABEL_FIXING))
-                except Exception:
-                    pass
+                except Exception: pass
 
-            # Push all collected fixes
+            fixes_applied = []
             for filepath, patched, file_sha in fixes_ready:
                 if not self.dry_run:
-                    self.repo.update_file(
-                        filepath,
-                        f"fix: address review comments in {filepath}",
-                        patched,
-                        file_sha,
-                        branch=branch,
-                    )
-                    log.info(f"  Pushed fix for {filepath}")
+                    self.repo.update_file(filepath, f"fix: address review in {filepath}", patched, file_sha, branch=branch)
                     fixes_applied.append(filepath)
                 else:
-                    log.info(f"  [DRY RUN] Would push fix for {filepath}")
+                    log.info(f"  [DRY RUN] Would fix {filepath}")
 
-            # Post summary comment
             if fixes_applied:
-                summary = "Applied fixes for:\n" + "\n".join(
-                    f"- `{f}`" for f in fixes_applied
-                )
+                summary = "Applied fixes for:\n" + "\n".join(f"- `{f}`" for f in fixes_applied)
                 if not self.dry_run:
                     pr.create_issue_comment(summary + FIX_SIGNATURE)
                     try:
                         pr.remove_from_labels(self.repo.get_label(LABEL_REVIEWED))
-                    except Exception:
-                        pass
-                    tg(f"🔧 Fix agent pushed fixes to PR #{pr.number}: {', '.join(fixes_applied)}\n{pr.html_url}")
-                log.info(f"  Fixed {len(fixes_applied)} files")
+                    except Exception: pass
+                    tg(f"🔧 Fix agent pushed fixes to PR #{pr.number}\n{pr.html_url}")
                 self.stats["fixed"] += 1
             else:
-                log.info(f"  No fixes were applied")
                 self.stats["skipped"] += 1
 
             return True
@@ -454,92 +424,65 @@ class FixAgent:
         except Exception as e:
             log.error(f"  Fix failed for PR #{pr.number}: {e}", exc_info=True)
             self.stats["failed"] += 1
-            tg(f"❌ Fix agent failed on PR #{pr.number}: {e}\n{pr.html_url}")
             return False
 
-        finally:
-            # Ensure fixing label is removed even on exception
-            # (normal path removes it before pushing; this is the safety net)
-            if not self.dry_run:
-                try:
-                    pr.remove_from_labels(self.repo.get_label(LABEL_FIXING))
-                except Exception:
-                    pass
-
     def get_fixable_prs(self) -> list:
-        """Get open PRs that have FOREMAN reviews with issues."""
+        """Get open PRs that have FOREMAN reviews with actionable issues."""
         pulls = self.repo.get_pulls(state="open", sort="created", direction="asc")
         fixable = []
         for pr in pulls:
-            pr_labels = {l.name for l in pr.labels}
-            if LABEL_FIXING in pr_labels:
-                continue  # Already being fixed
-            if LABEL_NEEDS_HUMAN in pr_labels:
-                continue  # Escalated
-            # Check for a FOREMAN review with issues
-            reviews = [r for r in pr.get_reviews() if r.body and "Review by FOREMAN" in r.body]
-            review = reviews[-1] if reviews else None
-            if review:
-                fixable.append(pr)
+            try:
+                pr_labels = {l.name for l in pr.labels}
+                if LABEL_FIXING in pr_labels or LABEL_NEEDS_HUMAN in pr_labels:
+                    continue
+                reviews = [r for r in pr.get_reviews() if r.body and BOT_SIGNATURE.strip() in r.body]
+                if not reviews:
+                    continue
+                latest = reviews[-1]
+                data = self._parse_review_data(latest.body)
+                if data["verdict"] == "REQUEST_CHANGES" or (data["critical_count"] + data["important_count"] > 0):
+                    fixable.append(pr)
+            except Exception as e:
+                log.error(f"Error checking PR #{pr.number}: {e}")
         return fixable
 
     def run_once(self, pr_number: int = None) -> dict:
         log.info("=" * 60)
         log.info(f"FOREMAN fixer @ {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
-
-        if not self.cost.check_ceiling():
-            log.warning("Parked — cost ceiling reached")
-            return self.stats
-
+        if not self.cost.check_ceiling(): return self.stats
         if pr_number:
-            pr = self.repo.get_pull(pr_number)
-            self.fix_pr(pr)
+            self.fix_pr(self.repo.get_pull(pr_number))
         else:
             queue = self.get_fixable_prs()
-            log.info(f"Fixable PRs: {len(queue)}")
             for pr in queue:
                 self.fix_pr(pr)
-                if not self.cost.check_ceiling():
-                    break
-
+                if not self.cost.check_ceiling(): break
         log.info(f"Stats: {self.stats}")
         log.info(f"{self.cost.summary()}")
         return self.stats
 
-
-# ─── CLI ──────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser(description="FOREMAN Fix Agent")
-    parser.add_argument("--pr", type=int, default=None, help="Fix a specific PR")
-    parser.add_argument("--once", action="store_true", help="Single pass then exit")
-    parser.add_argument("--dry-run", action="store_true", help="Generate fixes without pushing")
-    parser.add_argument("--cost-summary", action="store_true", help="Show daily API cost summary")
+    parser.add_argument("--pr", type=int, default=None)
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--cost-summary", action="store_true")
     args = parser.parse_args()
-
     if args.cost_summary:
-        try:
-            print_daily_summary()
-            sys.exit(0)
-        except Exception as e:
-            log.error(f"Failed to display cost summary: {e}")
-            sys.exit(1)
-
+        print_daily_summary()
+        sys.exit(0)
     for var in ["GITHUB_TOKEN", "FOREMAN_REPO"]:
         if not os.environ.get(var):
             log.error(f"{var} not set")
             sys.exit(1)
-
     agent = FixAgent(GITHUB_TOKEN, REPO_NAME, dry_run=args.dry_run)
-
     if args.pr:
         agent.run_once(pr_number=args.pr)
     elif args.once:
         agent.run_once()
     else:
-        log.error("Fix agent runs on-demand only. Use --pr N, --once, or --cost-summary")
+        log.error("Use --pr N, --once, or --cost-summary")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
