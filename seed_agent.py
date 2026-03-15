@@ -159,6 +159,58 @@ class GitHubClient:
             log.error(f"Error fetching auto-refined issues: {e}")
             return []
 
+    def get_label_applied_at(self, issue, label_name: str):
+        """
+        Find when a label was most recently applied to an issue using timeline events.
+        Returns a timezone-aware datetime, or None if the event is not found.
+        """
+        try:
+            applied_at = None
+            for event in issue.get_events():
+                if event.event == "labeled" and event.label and event.label.name == label_name:
+                    ts = event.created_at
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    if applied_at is None or ts > applied_at:
+                        applied_at = ts
+            return applied_at
+        except Exception as e:
+            log.warning(f"  Could not fetch timeline for #{issue.number}: {e}")
+            return None
+
+    def get_stale_refined_issues(self, delay_hours: float) -> list:
+        """
+        Return open 'auto-refined' issues (without 'hold') where the label was
+        applied more than delay_hours ago, determined via timeline events.
+        Falls back to issue.created_at if no labeled event is found.
+        """
+        try:
+            issues = self.repo.get_issues(
+                state="open",
+                labels=[LABEL_AUTO_REFINED],
+                sort="created",
+                direction="asc",
+            )
+            now = datetime.now(timezone.utc)
+            stale = []
+            for issue in issues:
+                labels = {l.name for l in issue.labels}
+                if LABEL_HOLD in labels:
+                    continue
+                labeled_at = self.get_label_applied_at(issue, LABEL_AUTO_REFINED)
+                if labeled_at is None:
+                    # Fall back to issue creation time
+                    labeled_at = issue.created_at
+                    if labeled_at.tzinfo is None:
+                        labeled_at = labeled_at.replace(tzinfo=timezone.utc)
+                age_hours = (now - labeled_at).total_seconds() / 3600
+                if age_hours >= delay_hours:
+                    stale.append((issue, labeled_at, age_hours))
+            return stale
+        except Exception as e:
+            log.error(f"Error fetching stale refined issues: {e}")
+            return []
+
     def get_all_open_issues(self) -> list:
         """Get all open issues for context (brainstorm dedup)."""
         try:
@@ -348,37 +400,20 @@ class ForemanAgent:
             raise
 
     def auto_promote_refined_issues(self) -> int:
-        """Find 'auto-refined' issues older than threshold and promote to 'ready'."""
+        """Find 'auto-refined' issues labeled longer than threshold ago and promote to 'ready'."""
         log.info("⏫ Checking for issues to auto-promote...")
         promoted_count = 0
-        
+
         try:
-            issues = self.github.get_auto_refined_issues()
-            now = datetime.now(timezone.utc)
-            
-            for issue in issues:
+            stale = self.github.get_stale_refined_issues(AUTO_PROMOTE_DELAY_HOURS)
+
+            for issue, labeled_at, age_hours in stale:
                 if promoted_count >= AUTO_PROMOTE_MAX_PER_CYCLE:
                     log.info(f"  Reached max auto-promotions per cycle ({AUTO_PROMOTE_MAX_PER_CYCLE})")
                     break
-                    
-                labels = {l.name for l in issue.labels}
-                if LABEL_HOLD in labels:
-                    log.info(f"  ⏩ Skipping #{issue.number} — has 'hold' label")
-                    continue
-                
-                # Check age
-                created_at = issue.created_at
-                if created_at.tzinfo is None:
-                    created_at = created_at.replace(tzinfo=timezone.utc)
-                
-                age_hours = (now - created_at).total_seconds() / 3600
-                
-                if age_hours < AUTO_PROMOTE_DELAY_HOURS:
-                    log.info(f"  ⏳ Skipping #{issue.number} — only {age_hours:.1f}h old (threshold {AUTO_PROMOTE_DELAY_HOURS}h)")
-                    continue
-                
-                log.info(f"  ⏫ Promoting #{issue.number} to ready ({age_hours:.1f}h old)")
-                
+
+                log.info(f"  ⏫ Promoting #{issue.number} to ready (labeled {age_hours:.1f}h ago)")
+
                 if self.dry_run:
                     log.info(f"  [DRY RUN] Would promote #{issue.number} and send notification")
                 else:
@@ -386,25 +421,25 @@ class ForemanAgent:
                         # Relabel
                         issue.remove_from_labels(LABEL_AUTO_REFINED)
                         issue.add_to_labels(LABEL_READY)
-                        
+
                         # Comment
                         issue.create_comment(
                             f"⏫ Auto-promoted to `ready` after {AUTO_PROMOTE_DELAY_HOURS}h delay.\n\n"
                             f"Implementation agent will pick this up soon. Add `{LABEL_HOLD}` label to pause."
                         )
-                        
+
                         # Notify
                         tg(f"⏫ Auto-promoted #{issue.number} to <b>ready</b>: {issue.title}")
                     except Exception as e:
                         log.error(f"  ❌ Failed to promote #{issue.number}: {e}")
                         continue
-                
+
                 promoted_count += 1
                 self.stats["promoted"] += 1
 
         except Exception as e:
             log.error(f"Error during auto-promotion: {e}")
-            
+
         return promoted_count
 
     def refine_issue(self, issue) -> bool:
