@@ -9,6 +9,10 @@ on:
         description: 'PR number to fix'
         required: false
 
+concurrency:
+  group: fix-agent
+  cancel-in-progress: false
+
 jobs:
   fix:
     runs-on: ubuntu-latest

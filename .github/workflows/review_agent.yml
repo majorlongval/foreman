@@ -8,6 +8,10 @@ on:
     types: [opened, synchronize]  # Trigger on new PRs and updates
   workflow_dispatch:               # Manual trigger
 
+concurrency:
+  group: review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   review:
     runs-on: ubuntu-latest
