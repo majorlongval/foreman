@@ -456,7 +456,15 @@ class PRReviewer:
             test_report = self._validate_test_presence(pr, files)
             if test_report:
                 log.info(f"  ⚠️ Test presence warning for PR #{pr.number} — requesting changes.")
-                if not any(test_report in r for r in prior_reviews):
+                
+                existing_reviews = list(pr.get_reviews())
+                already_reviewed = any(
+                    getattr(r, "commit_id", None) == pr.head.sha and 
+                    "Review by FOREMAN" in (getattr(r, "body", "") or "") 
+                    for r in existing_reviews
+                )
+                
+                if not already_reviewed:
                     if not self.dry_run:
                         pr.create_review(body=test_report + BOT_SIGNATURE, event="REQUEST_CHANGES")
                 self.stats["reviewed"] += 1
