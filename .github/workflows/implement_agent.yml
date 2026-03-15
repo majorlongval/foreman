@@ -3,6 +3,8 @@ name: Run Implement Agent
 on:
   issues:
     types: [labeled]      # Triggers when any issue is labeled
+  pull_request:
+    types: [closed]       # Triggers after a PR is merged — picks up next ready issue
   workflow_dispatch:      # Manual trigger — picks next ready issue automatically
 
 concurrency:
@@ -12,7 +14,10 @@ concurrency:
 jobs:
   implement:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ready'
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'ready' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
 
     permissions:
       issues: write
@@ -43,8 +48,8 @@ jobs:
           ROUTING_PROFILE: cheap
           COST_CEILING_USD: "3.0"
 
-      - name: Run Implement Agent (manual trigger — picks next ready issue)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Run Implement Agent (manual or post-merge — picks next ready issue)
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
         run: python implement_agent.py --once
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
