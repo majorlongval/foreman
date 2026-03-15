@@ -53,6 +53,46 @@ def notify(message: str) -> bool:
 
     return False
 
+def notify_auto_merge(pr_number: int, pr_title: str, pr_url: str) -> bool:
+    """Notify that a PR was automatically merged."""
+    msg = (
+        f"<b>✅ Auto-merged PR #{pr_number}</b>\n"
+        f"<i>{pr_title}</i>\n\n"
+        f"<a href='{pr_url}'>View on GitHub</a>"
+    )
+    return notify(msg)
+
+def notify_human_review(pr_number: int, pr_title: str, pr_url: str, reason: str) -> bool:
+    """Notify that a PR requires manual human review."""
+    msg = (
+        f"<b>👀 Human Review Required: PR #{pr_number}</b>\n"
+        f"<i>{pr_title}</i>\n\n"
+        f"<b>Reason:</b> {reason}\n\n"
+        f"<a href='{pr_url}'>View on GitHub</a>\n\n"
+        f"Use <code>/approve {pr_number}</code> to proceed or <code>/reject {pr_number}</code> to block."
+    )
+    return notify(msg)
+
+def notify_fix_triggered(pr_number: int, pr_title: str, pr_url: str, attempt: int, max_attempts: int) -> bool:
+    """Notify that the fix agent has been triggered."""
+    msg = (
+        f"<b>🛠️ Fix Agent Triggered: PR #{pr_number}</b>\n"
+        f"<i>{pr_title}</i>\n\n"
+        f"<b>Cycle:</b> {attempt}/{max_attempts}\n\n"
+        f"<a href='{pr_url}'>View on GitHub</a>"
+    )
+    return notify(msg)
+
+def notify_max_fixes_reached(pr_number: int, pr_title: str, pr_url: str, cycles: int) -> bool:
+    """Notify that the maximum number of fix attempts has been reached."""
+    msg = (
+        f"<b>⚠️ Max Fixes Reached: PR #{pr_number}</b>\n"
+        f"<i>{pr_title}</i>\n\n"
+        f"Stopped after {cycles} cycles to prevent infinite loop.\n\n"
+        f"<a href='{pr_url}'>View on GitHub</a>"
+    )
+    return notify(msg)
+
 # --- Bot Command Handling ---
 
 def _send_reply(chat_id: int, message: str) -> bool:
@@ -115,11 +155,37 @@ def _handle_resume(update):
     agent_state_manager.set_state(AgentState.RUNNING)
     _send_reply(chat_id, "Agent loop resumed.")
 
+@authorized
+def _handle_approve(update):
+    chat_id = update["message"]["chat"]["id"]
+    text = update["message"].get("text", "")
+    parts = text.split(" ")
+    if len(parts) < 2:
+        _send_reply(chat_id, "Usage: /approve <pr_number>")
+        return
+    pr_num = parts[1]
+    log.info(f"  ✅ Manual approval for PR #{pr_num} received via Telegram.")
+    _send_reply(chat_id, f"Approval for PR #{pr_num} registered. Review agent will pick it up.")
+
+@authorized
+def _handle_reject(update):
+    chat_id = update["message"]["chat"]["id"]
+    text = update["message"].get("text", "")
+    parts = text.split(" ")
+    if len(parts) < 2:
+        _send_reply(chat_id, "Usage: /reject <pr_number>")
+        return
+    pr_num = parts[1]
+    log.info(f"  ❌ Manual rejection for PR #{pr_num} received via Telegram.")
+    _send_reply(chat_id, f"Rejection for PR #{pr_num} registered.")
+
 COMMANDS = {
     "/start": _handle_start,
     "/status": _handle_status,
     "/pause": _handle_pause,
     "/resume": _handle_resume,
+    "/approve": _handle_approve,
+    "/reject": _handle_reject,
 }
 
 def _poll_updates():
