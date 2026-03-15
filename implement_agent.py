@@ -91,7 +91,14 @@ Rules:
 - Include logging statements — this runs unattended, logs are the only visibility
 - Wrap everything in try/except — never let an unhandled exception crash a loop
 - Keep it simple and focused. No over-engineering.
-- If modifying an existing file, preserve all existing code and only add/change what's needed"""
+- If modifying an existing file, preserve all existing code and only add/change what's needed
+
+Before you commit:
+- PyGithub paginators: Do NOT wrap in list(). Iterate directly.
+- Optimization: NEVER call get_label() inside a loop. Use string-based filtering.
+- Env Vars: Use float() for all numeric environment variables unless they are strictly integer counts/limits.
+- Performance: Cache expensive GitHub API results (like get_git_tree) at the instance level.
+- PR Safety: Always check pr.mergeable_state == "clean" before calling pr.merge()."""
 
 # ─── GitHub Client ────────────────────────────────────────────
 class GitHubClient:
