@@ -63,6 +63,8 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("foreman")
+# Suppress internal LiteLLM logging
+logging.getLogger("litellm").setLevel(logging.WARNING)
 
 # ─── Cost Tracking & LLM ─────────────────────────────────────
 
@@ -315,6 +317,9 @@ class ForemanAgent:
             def __init__(self, inp, out):
                 self.input_tokens = inp
                 self.output_tokens = out
+        
+        log.info(f"  💰 LLM Call ({model}): {response.input_tokens} prompt + {response.output_tokens} completion tokens")
+        
         self.cost.record(model, _Usage(response.input_tokens, response.output_tokens),
                          agent="seed", action=task)
         return response
@@ -407,6 +412,7 @@ class ForemanAgent:
                 max_tokens=500,
             )
             refined_title = title_response.text.strip().strip('"').strip("'")
+            log.info(f"  ✨ Refined title: {refined_title}")
 
             self.github.create_refined_issue(issue, refined_body, refined_title)
             self.stats["refined"] += 1
@@ -429,6 +435,7 @@ class ForemanAgent:
         # Gather context
         open_issues = self.github.get_all_open_issues()
         closed_issues = self.github.get_closed_issues(30)
+        log.info(f"  🔍 Brainstorm context: {len(open_issues)} open issues, {len(closed_issues)} recently closed issues")
 
         open_summary = "\n".join(
             f"- #{i.number} [{', '.join(l.name for l in i.labels)}] {i.title}"
@@ -442,7 +449,7 @@ class ForemanAgent:
         try:
             response = self._complete(
                 task="brainstorm",
-                system=BRAINSTORM_SYSTEM.format(max_drafts=BRAINSTORM_MAX_DRAFTS),
+                system=BRAINSTORM_SYSTEM.format(max_drafts=BRAINSTORM_MAX_DRAFETS),
                 message=(
                     f"## VISION.md\n\n{self.vision}\n\n"
                     f"## Open Issues\n\n{open_summary or '(none)'}\n\n"
