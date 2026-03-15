@@ -56,13 +56,12 @@ class TestReviewAgentTestPresence(unittest.TestCase):
                 "settings.json"
             ]
             
-            result = self.reviewer.validate_test_presence(pr, files)
+            result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNone(result, "PR with only config/docs should not be flagged.")
             log.info("✅ test_validate_test_presence_config_only passed")
         except Exception as e:
             log.error(f"test_validate_test_presence_config_only failed: {e}")
             raise
-
     def test_validate_test_presence_missing_tests(self):
         """
         PRs modifying source files (.py) without adding/modifying test files should be flagged CRITICAL.
@@ -76,15 +75,14 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             # Modifying source code but no test files
             files = ["core/engine.py", "utils/helper.py"]
             
-            result = self.reviewer.validate_test_presence(pr, files)
+            result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNotNone(result, "PR modifying source without tests should be flagged.")
             self.assertIn("[CRITICAL]", result)
-            self.assertIn("missing corresponding tests", result.lower())
+            self.assertIn("missing tests", result.lower())
             log.info("✅ test_validate_test_presence_missing_tests passed")
         except Exception as e:
             log.error(f"test_validate_test_presence_missing_tests failed: {e}")
             raise
-
     def test_validate_test_presence_missing_evidence(self):
         """
         PRs including tests but lacking execution output in the description should be flagged IMPORTANT.
@@ -98,7 +96,7 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             # Source and test file both present
             files = ["feature.py", "tests/test_feature.py"]
             
-            result = self.reviewer.validate_test_presence(pr, files)
+            result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNotNone(result, "PR with tests but no execution evidence should be flagged.")
             self.assertIn("[IMPORTANT]", result)
             self.assertIn("pytest execution output", result.lower())
@@ -106,7 +104,6 @@ class TestReviewAgentTestPresence(unittest.TestCase):
         except Exception as e:
             log.error(f"test_validate_test_presence_missing_evidence failed: {e}")
             raise
-
     def test_validate_test_presence_valid(self):
         """
         PRs with tests and pytest execution output in the body should pass.
@@ -127,13 +124,12 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             # Supports both tests/test_*.py and test_*.py
             files = ["logic.py", "test_logic.py"]
             
-            result = self.reviewer.validate_test_presence(pr, files)
+            result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNone(result, "Valid PR with tests and evidence should not be flagged.")
             log.info("✅ test_validate_test_presence_valid passed")
         except Exception as e:
             log.error(f"test_validate_test_presence_valid failed: {e}")
             raise
-
     def test_validate_test_presence_skip_review(self):
         """
         PRs with the skip-review label should be exempt from test-presence checks.
@@ -151,7 +147,7 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             # Even though source is modified without tests, skip-review label should override
             files = ["agent_loop.py"]
             
-            result = self.reviewer.validate_test_presence(pr, files)
+            result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNone(result, "PRs with skip-review label should be exempted from checks.")
             log.info("✅ test_validate_test_presence_skip_review passed")
         except Exception as e:
