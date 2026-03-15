@@ -170,6 +170,69 @@ class PRReviewer:
         return "\n\n".join(diff_parts)
     def get_changed_files(self, pr) -> list[str]:
         return [f.filename for f in pr.get_files()]
+    def _validate_test_presence(self, pr, files: list[str]) -> str:
+        """
+        Automated check for tests and execution evidence.
+        Returns a review body if issues found, else None.
+        """
+        try:
+            # PRs that only modify configuration files (.yml, .json, .toml, .md, requirements.txt) 
+            # or carry the skip-review label are exempted from test-presence checks.
+            pr_labels = {l.name for l in pr.labels}
+            if LABEL_SKIP_REVIEW in pr_labels:
+                return None
+            exempt_exts = ('.yml', '.yaml', '.json', '.toml', '.md')
+            is_exempt = lambda f: f.endswith(exempt_exts) or f == "requirements.txt"
+            if all(is_exempt(f) for f in files):
+                log.info(f"  ℹ️ PR #{pr.number} is config-only. Skipping test-presence check.")
+                return None
+            has_source = False
+            has_test = False
+            for f in files:
+                if f.endswith(".py"):
+                    basename = os.path.basename(f)
+                    # Match tests/test_*.py or test_*.py
+                    if basename.startswith("test_"):
+                        has_test = True
+                    else:
+                        has_source = True
+            issues = []
+            # PRs modifying source files without adding/modifying tests/test_*.py or test_*.py are flagged as [CRITICAL].
+            if has_source and not has_test:
+                issues.append("- **[CRITICAL]** `PR` — This PR modifies source code (.py) but does not include corresponding test changes (test_*.py).")
+            # PRs containing test files but no pytest execution output in the description are flagged as [IMPORTANT].
+            if has_test:
+                body = (pr.body or "").lower()
+                if "pytest" not in body and "test session starts" not in body:
+                    issues.append("- **[IMPORTANT]** `PR Description` — Test changes detected, but no `pytest` execution output (evidence) was found in the PR description.")
+            if not issues:
+                return None
+            crit_count = sum(1 for i in issues if "[CRITICAL]" in i)
+            imp_count = sum(1 for i in issues if "[IMPORTANT]" in i)
+            review_body = (
+                "## Summary\n"
+                "Automated quality gate failed. All source code changes require accompanying tests "
+                "and execution evidence in the PR description.\n\n"
+                "## Issues\n"
+                + "\n".join(issues) + "\n\n"
+                "## Verdict\n"
+                "REQUEST_CHANGES\n"
+                "Automated test-presence check failed.\n\n"
+                "## Review Data\n"
+                "```json\n"
+                "{\n"
+                f'  "verdict": "REQUEST_CHANGES",\n'
+                f'  "critical_count": {crit_count},\n'
+                f'  "important_count": {imp_count},\n'
+                '  "suggestion_count": 0,\n'
+                f'  "affected_files": {json.dumps(files)}\n'
+                "}\n"
+                "```"
+            )
+            return review_body
+        except Exception as e:
+            log.error(f"  ❌ Error in _validate_test_presence for PR #{pr.number}: {e}")
+            return None
     def _parse_review_data(self, review_body: str) -> dict:
         defaults = {
             "verdict": "COMMENT",
@@ -280,8 +343,17 @@ class PRReviewer:
                     tg(f"🔍 PR #{pr.number} needs human review — {fix_cycles} fix cycles exhausted\n{pr.html_url}")
                 self.stats["skipped"] += 1
                 return True
-            diff = self.get_pr_diff(pr)
             files = self.get_changed_files(pr)
+            # ─── Automated Pre-checks ─────────────────────────────────
+            auto_review_body = self._validate_test_presence(pr, files)
+            if auto_review_body:
+                log.info(f"  ⚠️ Automated test-presence check failed for PR #{pr.number}")
+                if not self.dry_run:
+                    pr.create_review(body=auto_review_body + BOT_SIGNATURE, event="COMMENT")
+                self.stats["reviewed"] += 1
+                return True
+            # ──────────────────────────────────────────────────────────
+            diff = self.get_pr_diff(pr)
             prior_reviews = self._get_prior_reviews(pr)
             MAX_DIFF_CHARS = 100000
             if len(diff) > MAX_DIFF_CHARS:
