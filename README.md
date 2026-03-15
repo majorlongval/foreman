@@ -1,6 +1,6 @@
 # 🤖 FOREMAN — Self-Improving Autonomous Dev Pipeline
 
-A bootstrapping agent that refines, generates, and eventually implements its own
+A bootstrapping agent system that refines, generates, and eventually implements its own
 development tasks. Point it at a GitHub repo and it starts building itself.
 
 ## Quickstart
@@ -16,8 +16,9 @@ cd foreman
 
 ```
 foreman/
-├── VISION.md          # The north star
-├── seed_agent.py      # The agent loop
+├── VISION.md             # The north star
+├── brainstorm_agent.py   # Generates draft tasks
+├── refine_agent.py       # Turns drafts into specs
 ├── requirements.txt
 ├── Dockerfile
 ├── .env.example
@@ -44,41 +45,27 @@ Create 2-3 rough issues on the repo with the label `needs-refinement`:
 
 These are intentionally vague — the agent will refine them.
 
-### 5. Run it
+### 5. Run it locally
 
 ```bash
 # Install deps
 pip install -r requirements.txt
 
-# Dry run first (logs what it would do, doesn't touch GitHub)
-python seed_agent.py --once --dry-run
+# Brainstorm new drafts (based on VISION.md)
+python brainstorm_agent.py --dry-run
+python brainstorm_agent.py
 
-# Single pass for real
-python seed_agent.py --once
-
-# Force brainstorm mode
-python seed_agent.py --brainstorm-only --dry-run
-
-# Full loop
-python seed_agent.py
+# Refine pending issues (labeled 'needs-refinement')
+python refine_agent.py --dry-run
+python refine_agent.py
 ```
 
-### 6. Deploy to cloud (Railway)
+### 6. Automated Workflows (GitHub Actions)
 
-```bash
-# Install Railway CLI
-npm install -g @railway/cli
+FOREMAN is designed to run automatically via GitHub Actions:
 
-# Deploy
-railway login
-railway init
-railway up
-
-# Set env vars
-railway variables set GITHUB_TOKEN=ghp_xxx
-railway variables set ANTHROPIC_API_KEY=sk-ant-xxx
-railway variables set FOREMAN_REPO=youruser/foreman
-```
+- **Brainstorm Workflow**: Runs on a schedule or manual trigger to ensure the pipeline is never empty.
+- **Refine Workflow**: Triggered instantly whenever you add the `needs-refinement` label to an issue.
 
 ## Issue Lifecycle
 
@@ -97,9 +84,10 @@ railway variables set FOREMAN_REPO=youruser/foreman
 
 | Command | What it does |
 |---------|-------------|
-| `--once` | Single pass, then exit |
-| `--brainstorm-only` | Skip refinement, force brainstorm |
+| `python brainstorm_agent.py` | Generate draft issues from VISION.md |
+| `python refine_agent.py` | Process all issues labeled `needs-refinement` |
 | `--dry-run` | Log everything, touch nothing |
+| `--once` | Single pass, then exit (default) |
 
 ## Environment Variables
 
@@ -108,7 +96,6 @@ railway variables set FOREMAN_REPO=youruser/foreman
 | `GITHUB_TOKEN` | required | GitHub PAT with repo scope |
 | `ANTHROPIC_API_KEY` | required | Anthropic API key |
 | `FOREMAN_REPO` | required | `owner/repo` format |
-| `POLL_INTERVAL` | `60` | Seconds between passes |
 | `BRAINSTORM_THRESHOLD` | `2` | If queue < this, brainstorm |
 | `BRAINSTORM_MAX_DRAFTS` | `5` | Max drafts per brainstorm |
 | `COST_CEILING_USD` | `5.0` | Daily spend limit |
@@ -117,8 +104,8 @@ railway variables set FOREMAN_REPO=youruser/foreman
 
 ## What happens next
 
-The agent will refine its own tasks, then brainstorm new ones. You approve
-the drafts, and the cycle continues. Over time, the agent builds out:
+The system will refine its own tasks, then brainstorm new ones. You approve
+the drafts, and the cycle continues. Over time, the system builds out:
 
 1. Telegram bot (so you can manage it from your phone)
 2. Real-time dashboard (wired to live agent state)
