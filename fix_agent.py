@@ -274,11 +274,17 @@ class FixAgent:
                 log.warning(f"  Failed to update PR data: {e}")
 
         if pr.mergeable is False:
-            raise ValueError("PR is not mergeable (conflicts)")
-        
-        # We need it to be explicitly True. None means calculating.
+            log.warning(f"  PR #{pr.number} is not mergeable (conflicts)")
+            return False
+
+        # None means GitHub is still calculating — wait, don't fail
         if pr.mergeable is not True:
-            log.info(f"  PR #{pr.number} mergeable status is {pr.mergeable} (waiting for calculation?)")
+            log.info(f"  PR #{pr.number} mergeable status is {pr.mergeable} (waiting for calculation)")
+            return False
+
+        # Don't attempt merge while CI checks are still running — would throw and trigger needs-human
+        if pr.mergeable_state in ("pending", "unknown", None):
+            log.info(f"  PR #{pr.number} mergeable_state is '{pr.mergeable_state}' — waiting for checks")
             return False
 
         cycles = self._count_fix_cycles(pr)
@@ -312,11 +318,13 @@ class FixAgent:
                 log.info(f"  [DRY RUN] Would auto-merge PR #{pr.number}")
                 return
 
-            pr.merge(
+            status = pr.merge(
                 merge_method="squash",
                 commit_title=f"auto-merge PR #{pr.number}: {pr.title}",
                 commit_message=f"Merged automatically by FOREMAN after approval.{FIX_SIGNATURE}"
             )
+            if not status.merged:
+                raise Exception(f"GitHub API returned merged=False: {getattr(status, 'message', 'unknown')}")
             log.info(f"  PR #{pr.number} merged successfully")
             tg(f"✅ Auto-merged PR #{pr.number}: {pr.title}\n{pr.html_url}")
 
