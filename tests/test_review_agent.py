@@ -157,6 +157,8 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             log.error(f"test_validate_test_presence_skip_review failed: {e}")
             raise
 
+    # CRITICAL TODO: You must implement the logic in review_agent.py to call pr.create_review() 
+    # and handle idempotency before these tests will pass.
     def test_preflight_submits_formal_review(self):
         """
         Verify that pre-flight test failures submit a formal REQUEST_CHANGES review.
