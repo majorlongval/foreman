@@ -32,6 +32,14 @@ jobs:
       - name: Install dependencies
         run: pip install --quiet -r requirements.txt
 
+      - name: Remove needs-human label
+        if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+        run: |
+          echo "Detected new commit push (synchronize). Attempting to remove 'needs-human' label to resume autonomous loop..."
+          gh pr edit ${{ github.event.pull_request.number }} --remove-label "needs-human" || echo "Label 'needs-human' not found or already removed. Continuing."
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+
       - name: Run Review Agent
         run: python review_agent.py --once
         env:
