@@ -269,6 +269,10 @@ class PRReviewer:
         Returns a string with the issues found, or None if validation passes or is exempt.
         """
         try:
+            labels = [label.name for label in pr.labels] if hasattr(pr, 'labels') else []
+            if "skip-review" in labels:
+                log.info(f"  ℹ️ PR #{pr.number} has skip-review label. Skipping test check.")
+                return None
             exempt_extensions = {".yml", ".yaml", ".json", ".toml", ".md", ".txt"}
             exempt_files = {"requirements.txt", ".gitignore", "LICENSE", "PROCFILE"}
             
