@@ -1,11 +1,8 @@
 name: Review PRs
 
 on:
-  push:
-    branches:
-      - 'foreman/**'              # Re-review after fix agent commits
   pull_request:
-    types: [opened, synchronize]  # Trigger on new PRs and updates
+    types: [opened, synchronize]  # Trigger on new PRs and re-review after fix agent commits
   workflow_dispatch:               # Manual trigger
 
 concurrency:
