@@ -62,6 +62,7 @@ class TestReviewAgentTestPresence(unittest.TestCase):
         except Exception as e:
             log.error(f"test_validate_test_presence_config_only failed: {e}")
             raise
+
     def test_validate_test_presence_missing_tests(self):
         """
         PRs modifying source files (.py) without adding/modifying test files should be flagged CRITICAL.
@@ -83,6 +84,7 @@ class TestReviewAgentTestPresence(unittest.TestCase):
         except Exception as e:
             log.error(f"test_validate_test_presence_missing_tests failed: {e}")
             raise
+
     def test_validate_test_presence_missing_evidence(self):
         """
         PRs including tests but lacking execution output in the description should be flagged IMPORTANT.
@@ -104,6 +106,7 @@ class TestReviewAgentTestPresence(unittest.TestCase):
         except Exception as e:
             log.error(f"test_validate_test_presence_missing_evidence failed: {e}")
             raise
+
     def test_validate_test_presence_valid(self):
         """
         PRs with tests and pytest execution output in the body should pass.
@@ -130,6 +133,7 @@ class TestReviewAgentTestPresence(unittest.TestCase):
         except Exception as e:
             log.error(f"test_validate_test_presence_valid failed: {e}")
             raise
+
     def test_validate_test_presence_skip_review(self):
         """
         PRs with the skip-review label should be exempt from test-presence checks.
@@ -151,6 +155,73 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             log.info("✅ test_validate_test_presence_skip_review passed")
         except Exception as e:
             log.error(f"test_validate_test_presence_skip_review failed: {e}")
+            raise
+
+    # CRITICAL TODO: You must implement the logic in review_agent.py to call pr.create_review() 
+    # and handle idempotency before these tests will pass.
+    def test_preflight_submits_formal_review(self):
+        """
+        Verify that pre-flight test failures submit a formal REQUEST_CHANGES review.
+        """
+        try:
+            log.info("Starting test_preflight_submits_formal_review")
+            pr = MagicMock()
+            pr.number = 89
+            pr.labels = []
+            pr.body = "Logic change without tests."
+            pr.head.sha = "commit123"
+            
+            # Setup files: source present, no tests
+            f1 = MagicMock()
+            f1.filename = "src/logic.py"
+            f1.patch = "diff content"
+            pr.get_files.return_value = [f1]
+            
+            # No prior reviews
+            pr.get_reviews.return_value = []
+            
+            # Execute
+            self.reviewer.dry_run = False
+            self.reviewer.review_pr(pr)
+            
+            # Assertions
+            pr.create_review.assert_called_once()
+            _, kwargs = pr.create_review.call_args
+            self.assertEqual(kwargs['event'], "REQUEST_CHANGES")
+            self.assertIn("Review by FOREMAN", kwargs['body'])
+            self.assertIn("[CRITICAL]", kwargs['body'])
+            log.info("✅ test_preflight_submits_formal_review passed")
+        except Exception as e:
+            log.error(f"test_preflight_submits_formal_review failed: {e}")
+            raise
+
+    def test_preflight_skips_if_review_exists(self):
+        """
+        The agent should skip posting a review if the current commit already has a FOREMAN review.
+        """
+        try:
+            log.info("Starting test_preflight_skips_if_review_exists")
+            pr = MagicMock()
+            pr.number = 89
+            pr.head.sha = "commit123"
+            
+            # Mock an existing review for this commit
+            existing_review = MagicMock()
+            # Must contain BOT_SIGNATURE.strip() which is "_Review by FOREMAN 🤖_"
+            existing_review.body = "Some body with _Review by FOREMAN 🤖_ signature"
+            existing_review.commit_id = "commit123"
+            existing_review.state = "CHANGES_REQUESTED"
+            pr.get_reviews.return_value = [existing_review]
+            
+            # Execute
+            self.reviewer.dry_run = False
+            self.reviewer.review_pr(pr)
+            
+            # Assertions: Should skip before even checking files or creating review
+            pr.create_review.assert_not_called()
+            log.info("✅ test_preflight_skips_if_review_exists passed")
+        except Exception as e:
+            log.error(f"test_preflight_skips_if_review_exists failed: {e}")
             raise
 
 if __name__ == "__main__":
