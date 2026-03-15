@@ -382,7 +382,7 @@ class ImplementAgent:
         if not self.cost.check_ceiling():
             log.warning("💤 Parked — cost ceiling reached")
             return self.stats
-        in_flight = list(self.repo.get_issues(state="open", labels=[self.repo.get_label(LABEL_IMPLEMENTING)]))
+        in_flight = list(self.github.repo.get_issues(state="open", labels=[self.github.repo.get_label(LABEL_IMPLEMENTING)]))
         if len(in_flight) >= 2:
             log.info(f"⏸️  {len(in_flight)} implementations already in flight — skipping")
             return self.stats
