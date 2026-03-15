@@ -14,7 +14,7 @@ import argparse
 from datetime import datetime, timezone
 from github import Github, GithubException
 from cost_monitor import CostTracker
-from llm_client import LLMClient, ModelRouter
+from llm_client import LLMClient, ModelRouter, estimate_cost
 from telegram_notifier import notify as tg
 
 # ─── Configuration ────────────────────────────────────────────
@@ -35,6 +35,8 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("foreman.implement")
+# Suppress LiteLLM noise
+logging.getLogger("litellm").setLevel(logging.WARNING)
 
 def get_coding_standards() -> str:
     """Reads STANDARDS.md from the repository root."""
@@ -212,10 +214,17 @@ class ImplementAgent:
         log.info(f"\n{self.router.summary()}\n")
 
     def _complete(self, task: str, system: str, message: str, max_tokens: int = None):
-        model = self.router.get(task)
-        response = self.llm.complete(model, system, message, max_tokens)
-        self.cost.record(model, response, agent="implement", action=task)
-        return response
+        try:
+            model = self.router.get(task)
+            response = self.llm.complete(model, system, message, max_tokens)
+            self.cost.record(model, response, agent="implement", action=task)
+            # Standardized cost line
+            cost = estimate_cost(model, response.input_tokens, response.output_tokens)
+            log.info(f"  💰 ${cost:.4f} ({task})")
+            return response
+        except Exception as e:
+            log.error(f"  LLM complete error in implement agent ({task}): {e}")
+            raise
 
     def _parse_json(self, text: str, label: str) -> dict | None:
         raw = text.strip()
@@ -307,9 +316,15 @@ class ImplementAgent:
             if not plan:
                 self.stats["failed"] += 1
                 return False
+            
             branch = plan["branch"]
             files = plan["files"][:MAX_FILES_PER_ISSUE]
-            log.info(f"  Plan: branch={branch}, {len(files)} files")
+            
+            # Expanded plan logging
+            log.info(f"  Plan branch: {branch}")
+            for f in files:
+                log.info(f"    - {f['path']} ({f['action']}): {f['description']}")
+            
             self.github.ensure_branch(branch)
             for file_spec in files:
                 log.info(f"  Generating: {file_spec['path']} ({file_spec['action']})")
@@ -446,8 +461,12 @@ def main():
     github = GitHubClient(GITHUB_TOKEN, REPO_NAME, dry_run=args.dry_run)
     agent = ImplementAgent(github, dry_run=args.dry_run)
     if args.once or args.issue:
-        stats = agent.run_once(issue_number=args.issue)
-        if stats["failed"] > 0 and stats["implemented"] == 0:
+        try:
+            stats = agent.run_once(issue_number=args.issue)
+            if stats["failed"] > 0 and stats["implemented"] == 0:
+                sys.exit(1)
+        except Exception as e:
+            log.error(f"Fatal implementation error: {e}")
             sys.exit(1)
     else:
         agent.run_loop()
