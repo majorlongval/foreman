@@ -1,0 +1,44 @@
+# FOREMAN Organism Configuration
+# Agents can read everything here. Changes via PR.
+# Budget ceiling is Jord-controlled (agents read-only).
+
+# -- Budget (Jord-controlled, agents read-only) --
+budget:
+  daily_limit_usd: 5.00
+
+# -- Models (agents can propose changes via PR) --
+# Replaces the existing ModelRouter ROUTING_PROFILES in llm_client.py.
+# The organism can add task-specific overrides as it evolves.
+models:
+  default: "gemini/gemini-2.5-flash"
+  reasoning: "gemini/gemini-2.5-pro"
+  council: "anthropic/claude-sonnet-4-6"
+
+# -- Agent Roster (agents can propose additions/removals) --
+agents:
+  gandalf:
+    role: scout
+    identity: agents/gandalf.md
+    memory: memory/gandalf/
+  gimli:
+    role: builder
+    identity: agents/gimli.md
+    memory: memory/gimli/
+  galadriel:
+    role: critic
+    identity: agents/galadriel.md
+    memory: memory/galadriel/
+  samwise:
+    role: gardener
+    identity: agents/samwise.md
+    memory: memory/samwise/
+
+# -- Brain Loop --
+loop:
+  schedule: "every 2 hours"
+  council_enabled: true
+  max_cycles_per_day: 12
+
+# -- Communication --
+communication:
+  telegram_enabled: true
