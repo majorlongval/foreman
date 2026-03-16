@@ -24,7 +24,8 @@ from brain.cost_tracking import load_today_spend, append_cost_entry
 from brain.council import CouncilResult, run_council
 from brain.memory import MemoryStore
 from brain.survey import SurveyResult, gather_survey
-from brain.tools import ToolContext, execute_tool, TOOL_SCHEMAS  # noqa: F401
+from brain.executor import execute_action
+from brain.tools import ToolContext
 
 log = logging.getLogger("foreman.brain.loop")
 
@@ -121,7 +122,17 @@ def run_cycle(
         return CycleOutcome("error", "", "", 0.0, str(e))
 
     # Step 5: Act — execute the action plan via tool-use LLM call
-    action_result = _execute_action(council_result)
+    tool_ctx = ToolContext(
+        repo=repo,
+        memory_root=memory_root,
+        agent_name=council_result.chair_name,
+        notify_fn=lambda msg: False,  # Telegram wired in main()
+        costs_dir=costs_dir,
+        budget_limit=config.daily_limit_usd,
+    )
+    action_result = execute_action(
+        council_result, llm, tool_ctx, config.model_default,
+    )
     log.info(f"Council decided: {council_result.decision}")
 
     # Step 6: Reflect
@@ -145,20 +156,6 @@ def run_cycle(
         error=None,
     )
 
-
-def _execute_action(council_result: CouncilResult) -> str:
-    """Execute the council's action plan.
-
-    For the seed implementation, we log the action plan.
-    Full tool-use execution (LLM call with tool schemas, parse tool_use
-    blocks, call execute_tool, return results) is wired up once the
-    organism has proven the council loop works.
-    """
-    if not council_result.action_plan:
-        return "No action plan — skipping execution."
-
-    log.info(f"Action plan: {council_result.action_plan}")
-    return f"Decision: {council_result.decision}\nPlan: {council_result.action_plan}"
 
 
 def _write_journal(memory_root: Path, content: str) -> None:

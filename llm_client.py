@@ -53,6 +53,30 @@ class LLMResponse:
     output_tokens: int
 
 
+@dataclass
+class ToolCallInfo:
+    """One tool call from an LLM response."""
+    id: str
+    function: "ToolCallFunction"
+
+
+@dataclass
+class ToolCallFunction:
+    """Function details within a tool call."""
+    name: str
+    arguments: str
+
+
+@dataclass
+class LLMToolResponse:
+    """Response from an LLM call that may include tool calls."""
+    text: str
+    input_tokens: int
+    output_tokens: int
+    tool_calls: List["ToolCallInfo"]
+    raw_message: dict  # Original message dict for conversation threading
+
+
 # ─── Pricing ─────────────────────────────────────────────────
 
 # Per 1M tokens: (input, output)
@@ -169,6 +193,94 @@ class LLMClient:
             )
         except Exception as e:
             log.error(f"  LLM complete call failed: {e}")
+            raise
+
+    def complete_with_tools(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[dict],
+        max_tokens: int = None,
+    ) -> LLMToolResponse:
+        """Send a completion request with tool definitions.
+
+        Args:
+            model: Provider/model string (e.g. "gemini/gemini-2.5-flash")
+            messages: Conversation messages (system, user, assistant, tool)
+            tools: Tool definitions in OpenAI format
+            max_tokens: Optional token limit
+
+        Returns:
+            LLMToolResponse with text, tool_calls, and raw_message for threading
+        """
+        try:
+            if "/" not in model:
+                raise ValueError(f"Model must be in 'provider/model' format, got: '{model}'")
+
+            provider = model.split("/", 1)[0]
+
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+            }
+            if max_tokens:
+                kwargs["max_tokens"] = max_tokens
+            if provider == "ollama":
+                kwargs["api_base"] = self._ollama_base
+
+            log.info(f"  🤖 {model} (with tools)")
+
+            response = litellm.completion(**kwargs)
+            if not getattr(response, "choices", None):
+                raise ValueError(f"LLM API returned no choices. Raw: {response}")
+
+            msg = response.choices[0].message
+            text = msg.content or ""
+            raw_tool_calls = getattr(msg, "tool_calls", None) or []
+
+            tool_calls = [
+                ToolCallInfo(
+                    id=tc.id,
+                    function=ToolCallFunction(
+                        name=tc.function.name,
+                        arguments=tc.function.arguments,
+                    ),
+                )
+                for tc in raw_tool_calls
+            ]
+
+            # Build raw_message for conversation threading
+            raw_message = {"role": "assistant", "content": text}
+            if raw_tool_calls:
+                raw_message["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in raw_tool_calls
+                ]
+
+            usage = getattr(response, "usage", None)
+            input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+            output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+            cost = estimate_cost(model, input_tokens, output_tokens)
+            log.info(f"  ✓ {input_tokens} in / {output_tokens} out = ${cost:.4f}"
+                     + (f" ({len(tool_calls)} tool calls)" if tool_calls else ""))
+
+            return LLMToolResponse(
+                text=text,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                tool_calls=tool_calls,
+                raw_message=raw_message,
+            )
+        except Exception as e:
+            log.error(f"  LLM complete_with_tools failed: {e}")
             raise
 
     def generate_embedding(self, text: str, model: str = None) -> List[float]:
