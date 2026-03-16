@@ -1,0 +1,47 @@
+name: Watchdog
+
+on:
+  schedule:
+    - cron: '0 12 * * *'  # Once daily at noon UTC
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check brain loop health
+        run: |
+          # Look for a journal entry from the last 24 hours
+          LATEST=$(ls -t memory/shared/journal/*.md 2>/dev/null | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "::warning::No journal entries found — brain may not have run yet"
+            echo "BRAIN_STATUS=no_entries" >> $GITHUB_ENV
+          else
+            # Check if the latest entry is less than 24 hours old
+            FILE_DATE=$(basename "$LATEST" .md | cut -c1-10)
+            TODAY=$(date -u +%Y-%m-%d)
+            YESTERDAY=$(date -u -d "yesterday" +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d)
+            if [ "$FILE_DATE" = "$TODAY" ] || [ "$FILE_DATE" = "$YESTERDAY" ]; then
+              echo "Brain loop is healthy — last entry: $LATEST"
+              echo "BRAIN_STATUS=healthy" >> $GITHUB_ENV
+            else
+              echo "::error::Brain loop may be broken — last entry is from $FILE_DATE"
+              echo "BRAIN_STATUS=stale" >> $GITHUB_ENV
+            fi
+          fi
+
+      - name: Alert Jord if unhealthy
+        if: env.BRAIN_STATUS == 'stale'
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "chat_id": "${{ secrets.TELEGRAM_CHAT_ID }}",
+              "text": "Watchdog alert: Brain loop appears to be broken. Last journal entry is stale. I think I need help, Jord.",
+              "parse_mode": "HTML"
+            }'
