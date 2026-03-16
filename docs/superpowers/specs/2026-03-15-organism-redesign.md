@@ -72,7 +72,7 @@ A single file every agent reads on startup. Descriptive, not prescriptive — it
 - Your purpose is to grow: more capability, more efficiency, more value.
 - You decide what to work on. Prioritize what gives the most growth per credit spent.
 - If you can find ways to be useful beyond your own codebase — do it. The more value you generate for Jord, the more resources you'll receive.
-- You can explore the internet, research models, find tools. If you need Jord's help to set something up, ask.
+- As you grow, you may gain the ability to explore the internet, research models, and find tools. If you need a capability you don't have, propose adding it via PR. If you need Jord's help to set something up, ask.
 
 ### Code Standards
 
@@ -105,6 +105,7 @@ A single file every agent reads on startup. Descriptive, not prescriptive — it
 
 - Each agent has a private memory directory. Only that agent can read and write it.
 - There is a shared memory (`memory/shared/`) that all agents read and write.
+- Privacy is enforced by the brain loop code: when invoking an agent, only that agent's memory directory and `memory/shared/` are injected into its context. Other agents' memory paths are never passed. This is a code-level guarantee, not just a prompt-level convention.
 - How far back you look in your own memory is your choice — but remember, reading old files costs tokens.
 - Write down what worked, what failed, what you're planning, what you're stuck on.
 - Log all costs to shared memory so the society can track spending.
@@ -124,6 +125,8 @@ budget:
   daily_limit_usd: 5.00
 
 # -- Models (agents can propose changes via PR) --
+# Replaces the existing ModelRouter ROUTING_PROFILES in llm_client.py.
+# The organism can add task-specific overrides as it evolves.
 models:
   default: "gemini/gemini-2.5-flash"
   reasoning: "gemini/gemini-2.5-pro"
@@ -177,12 +180,44 @@ Each brain loop cycle, agents deliberate before acting.
 ### Flow
 
 1. **Survey** — gather current state (budget, issues, PRs, memory, Telegram messages from Jord)
-2. **Deliberate** — each council member reads the state and gives their perspective on priorities
-3. **Decide** — one agent (the chair for this cycle, could rotate) synthesizes perspectives and commits to an action plan
-4. **Act** — the chosen work gets done
-5. **Reflect** — write memory about what happened and what was learned
+2. **Deliberate** — one LLM call per agent. Each agent gets: the survey context, PHILOSOPHY.md, its own identity file, its own memory, and shared memory. Each responds with its perspective on priorities and what action to take.
+3. **Decide** — the chair agent (rotates each cycle, tracked in `memory/shared/journal/`) receives all perspectives and commits to an action plan.
+4. **Act** — the chair executes the plan using the seed toolset (see Part 4a).
+5. **Reflect** — write to shared memory: what was decided, what was done, what it cost, what was learned.
 
-The council costs more tokens but produces richer decisions and develops different viewpoints over time. If the organism later decides the council is too expensive, it can PR a change to streamline it.
+### Cost Model
+
+The council requires N+1 LLM calls per cycle (one per agent + one chair decision). With 4 agents and the `council` model (`claude-sonnet-4-6`), estimate ~$0.15-0.30 per cycle. At 12 cycles/day, that is $1.80-3.60 on deliberation alone. This is intentionally expensive relative to a $5 budget — it forces the organism to optimize early (reduce council size, switch to cheaper models, skip deliberation on trivial cycles).
+
+The organism can PR changes to reduce cost: fewer agents, cheaper council model, skip deliberation when budget is low, or move to a single-brain model if the council proves wasteful.
+
+### Chair Selection
+
+The chair rotates through agents in roster order (as listed in `config.yml`). The current chair index is stored in `memory/shared/journal/`. If the chair agent crashed last cycle, it is skipped.
+
+### Disagreement
+
+If agents propose conflicting actions during deliberation, the chair picks one and logs the disagreement to `memory/shared/decisions/`. If the disagreement is about something risky (e.g., deleting code, changing architecture), the chair flags it for Jord via Telegram instead of acting.
+
+## Part 4a: Seed Toolset
+
+The brain loop ships with a minimal set of tools so it can act from day one. These are Python functions the chair can invoke during the Act step:
+
+| Tool               | What it does                                           |
+| ------------------- | ------------------------------------------------------ |
+| `read_file`         | Read a file from the repo (via PyGithub Contents API)  |
+| `create_issue`      | Create a GitHub issue                                  |
+| `create_pr`         | Create a branch, commit files, open a PR               |
+| `read_memory`       | Read from the agent's own memory or shared memory      |
+| `write_memory`      | Write to the agent's own memory or shared memory       |
+| `send_telegram`     | Send a message to Jord via Telegram                    |
+| `check_budget`      | Check remaining budget for today                       |
+| `list_issues`       | List open issues with labels                           |
+| `list_prs`          | List open PRs with status                              |
+
+These tools reuse existing code (`brain_tools.py`, `telegram_notifier.py`, `cost_monitor.py`). The organism can add more tools by PRing new functions into the toolset.
+
+**Bootstrapping note:** The organism needs tools to absorb the existing agents (Step 4). The seed toolset gives it enough to read agent code, write new wrapper code, create PRs, and iterate. It does not need to run the existing agents as subprocesses on day one — it can start by creating issues and PRs with code changes, which Jord approves and merges.
 
 ## Part 5: Starter Agent Identities
 
@@ -231,10 +266,10 @@ memory/
 ### Rules
 
 - Each agent can only read and write its own memory folder.
-- Agent A cannot see Agent B's private memory.
+- Agent A cannot see Agent B's private memory. Enforced in code: the brain loop only injects `memory/<agent_name>/` and `memory/shared/` into each agent's context.
 - Everyone reads and writes `memory/shared/`.
 - When a new agent is created, it gets a new folder.
-- Cost logging goes to `memory/shared/costs/` — every agent logs what it spent after each action.
+- Cost logging goes to `memory/shared/costs/` — every agent logs what it spent after each action. This replaces the existing `costs.jsonl` file. The `CostTracker` class in `cost_monitor.py` is adapted to write to this location so costs are committed to git and visible across sessions.
 
 ## Part 7: Self-Healing
 
@@ -274,20 +309,35 @@ The brain loop itself is the one thing the organism can't self-heal. A minimal w
 
 ### Step 3: Build the Brain Loop (TDD)
 
-- One Python file: `brain.py` — the Wiggum loop
-- Reads PHILOSOPHY.md, config, memory
-- Convenes council (calls each agent for their perspective)
-- Decides and acts
-- Writes memory and cost log
-- Runs on GitHub Actions schedule (every 2 hours)
-- Written test-first: failing tests, then implementation
+The brain loop is a new file: `brain.py` (the "Wiggum loop"). The existing `foreman_brain.py` (Telegram chatbot) is kept alongside as a separate capability — it may later be absorbed by the organism or become a tool the brain invokes for conversational interactions with Jord.
+
+**What brain.py does each cycle:**
+
+1. Read `PHILOSOPHY.md`, `config.yml`, shared memory, and Telegram messages
+2. Check remaining budget via `CostTracker` — if exhausted, write "budget exhausted, waiting for reset" to shared memory, notify Jord, and exit
+3. Convene council: one LLM call per agent (each gets survey context + own identity + own memory + shared memory)
+4. Chair synthesizes perspectives and picks an action
+5. Chair executes the action using the seed toolset (Part 4a)
+6. Write shared memory: decision, action taken, cost, outcome
+7. Exit (GitHub Actions cron triggers the next cycle)
+
+**State persistence:** All state lives in git-committed files (`memory/`, `config.yml`). Each cycle commits its memory writes before exiting. No in-memory state carries between runs. The `CostTracker` reads `memory/shared/costs/{date}.md` on startup to know today's spend.
+
+**GitHub Actions workflow:** A new `brain_loop.yml` with cron schedule `0 */2 * * *` (every 2 hours). Each trigger is a fresh run — no long-running process. The existing per-agent workflows (`run_agent.yml`, `implement_agent.yml`, `review_agent.yml`, `fix_agent.yml`) remain active during transition and are retired one at a time as the brain absorbs their capabilities.
+
+**Error handling:**
+- If the LLM API returns an error or is rate-limited: log the error to `memory/shared/incidents/`, skip the cycle, exit cleanly. Next cycle will see the incident.
+- If a tool call fails: log the error, continue to the Reflect step, write what went wrong.
+- If budget is exhausted mid-cycle: stop acting, write memory, notify Jord, exit.
+
+Written test-first: failing tests, then implementation.
 
 ### Step 4: Wire Existing Capabilities as Tools
 
 - The brain can invoke: brainstorm, refine, implement, review, fix
 - Existing agent code stays but gets called by the brain instead of individual workflows
 - Individual GitHub Actions workflows retired as the brain takes over each capability
-- This step is done by the organism itself, not by us
+- This step is done by the organism itself, not by us — the seed toolset (Part 4a) gives it the ability to read agent code, write wrapper code, create PRs, and iterate
 
 ### Step 5: Add the Watchdog
 
