@@ -1,128 +1,122 @@
-# 🤖 FOREMAN — Self-Improving Autonomous Dev Pipeline
+# FOREMAN — Self-Growing Dev Organism
 
-A bootstrapping agent that refines, generates, and eventually implements its own
-development tasks. Point it at a GitHub repo and it starts building itself.
+A society of autonomous agents that lives in a GitHub repo. Give it a daily budget, and it decides what to build, writes the code, reviews it, and ships it. You approve PRs and watch it grow.
 
-## Quickstart
+## How It Works
 
-### 1. Create the GitHub repo
+Every 2 hours, the **brain loop** runs one cycle:
+
+1. **Survey** — checks budget, open issues, PRs, recent incidents, memory
+2. **Deliberate** — each agent gives their perspective on what to prioritize
+3. **Decide** — the rotating chair agent synthesizes and commits to an action
+4. **Act** — executes the action plan using the seed toolset
+5. **Reflect** — writes a journal entry to shared memory
+
+Budget is energy. PR approval is natural selection. Growth is purpose.
+
+## The Council
+
+Four agents deliberate each cycle. The chair rotates so no single agent dominates.
+
+| Agent | Role | Purpose |
+|-------|------|---------|
+| **Gandalf** | Scout | Explore the codebase, brainstorm ideas, find opportunities |
+| **Gimli** | Builder | Implement features, fix code, open PRs |
+| **Galadriel** | Critic | Review quality, catch problems, enforce standards |
+| **Samwise** | Gardener | Maintain tests, docs, memory, backlog hygiene |
+
+Agents have distinct personalities (defined in `agents/*.md`), private memory, and can propose changes to their own identities and the system config.
+
+## Key Files
+
+```
+PHILOSOPHY.md              # Constitution every agent reads on startup
+config.yml                 # Organism DNA: budget, models, agent roster
+brain.py                   # CLI entry point — runs one brain cycle
+brain/
+  config.py                # Typed config loader
+  memory.py                # Scoped memory with privacy enforcement
+  cost_tracking.py         # JSONL cost persistence
+  survey.py                # Gather world state for deliberation
+  council.py               # Agent deliberation + chair rotation
+  tools.py                 # Seed toolset (9 tools)
+  loop.py                  # The Wiggum loop — orchestrates one cycle
+agents/                    # Agent identity files
+memory/
+  shared/                  # Shared memory (decisions, journal, costs, incidents)
+  gandalf/ gimli/ ...      # Private per-agent memory
+```
+
+## Configuration
+
+All configuration lives in `config.yml` — agents can see it and propose changes via PR:
+
+```yaml
+budget:
+  daily_limit_usd: 5.00
+
+models:
+  default: "gemini/gemini-2.5-flash"
+  reasoning: "gemini/gemini-2.5-pro"
+  council: "anthropic/claude-sonnet-4-6"
+
+agents:
+  gandalf:
+    role: scout
+    identity: agents/gandalf.md
+    memory: memory/gandalf/
+  # ... gimli, galadriel, samwise
+```
+
+## Running
+
+### GitHub Actions (default)
+
+The brain loop runs automatically via `.github/workflows/brain_loop.yml` every 2 hours. A daily watchdog checks health and alerts via Telegram if something breaks.
+
+Required secrets: `GH_PAT`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `FOREMAN_REPO`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+
+### Local
 
 ```bash
-gh repo create foreman --public --clone
-cd foreman
-```
-
-### 2. Copy these files in
-
-```
-foreman/
-├── VISION.md          # The north star
-├── seed_agent.py      # The agent loop
-├── requirements.txt
-├── Dockerfile
-├── .env.example
-└── README.md
-```
-
-### 3. Set up environment
-
-```bash
-cp .env.example .env
-# Edit .env with your tokens:
-#   GITHUB_TOKEN  — needs 'repo' scope (github.com/settings/tokens)
-#   ANTHROPIC_API_KEY — from console.anthropic.com
-#   FOREMAN_REPO  — e.g. "jordanuser/foreman"
-```
-
-### 4. Create your first issues
-
-Create 2-3 rough issues on the repo with the label `needs-refinement`:
-
-- "set up the basic telegram bot for foreman"
-- "add cost tracking to the dashboard"
-- "write tests for the refine loop"
-
-These are intentionally vague — the agent will refine them.
-
-### 5. Run it
-
-```bash
-# Install deps
 pip install -r requirements.txt
 
-# Dry run first (logs what it would do, doesn't touch GitHub)
-python seed_agent.py --once --dry-run
+# Set environment variables
+export GITHUB_TOKEN=ghp_...
+export FOREMAN_REPO=owner/repo
+export ANTHROPIC_API_KEY=sk-ant-...
+export GEMINI_API_KEY=...
+export TELEGRAM_BOT_TOKEN=...
+export TELEGRAM_CHAT_ID=...
 
-# Single pass for real
-python seed_agent.py --once
-
-# Force brainstorm mode
-python seed_agent.py --brainstorm-only --dry-run
-
-# Full loop
-python seed_agent.py
+# Run one cycle
+python brain.py
 ```
 
-### 6. Deploy to cloud (Railway)
+## Memory & Privacy
 
-```bash
-# Install Railway CLI
-npm install -g @railway/cli
+Each agent has private memory that only they can read/write. Shared memory (`memory/shared/`) is accessible to all. Privacy is enforced in code — the brain loop only injects an agent's own memory and shared memory into their context. No agent can access another agent's private files.
 
-# Deploy
-railway login
-railway init
-railway up
+All state persists as files committed to git. No in-memory state between runs.
 
-# Set env vars
-railway variables set GITHUB_TOKEN=ghp_xxx
-railway variables set ANTHROPIC_API_KEY=sk-ant-xxx
-railway variables set FOREMAN_REPO=youruser/foreman
-```
+## Safety
 
-## Issue Lifecycle
+- **Budget ceiling** — hard stop at daily limit, alerts via Telegram
+- **PR approval gate** — every code change requires human approval
+- **Watchdog** — daily health check, alerts if the brain loop stops running
+- **Self-healing** — agents can fix each other's code and propose patches
+- **Dispute resolution** — disagreements get flagged for Jord (the human)
 
-```
-  BRAINSTORM creates "draft" issues
-         │
-    you review + approve (relabel → "needs-refinement")
-         │
-    agent REFINES → creates "auto-refined" issue
-                  → tags original "deprecated"
-         │
-    ready for implementation
-```
+## Tech Stack
 
-## Commands
+- Python 3.11+, GitHub Actions
+- PyGithub (GitHub API)
+- LLM: provider-agnostic via LiteLLM (Gemini, Anthropic, OpenAI-compatible)
+- Telegram Bot for human communication
+- pytest for testing (68 tests, full TDD)
 
-| Command | What it does |
-|---------|-------------|
-| `--once` | Single pass, then exit |
-| `--brainstorm-only` | Skip refinement, force brainstorm |
-| `--dry-run` | Log everything, touch nothing |
+## See Also
 
-## Environment Variables
-
-| Var | Default | Description |
-|-----|---------|-------------|
-| `GITHUB_TOKEN` | required | GitHub PAT with repo scope |
-| `ANTHROPIC_API_KEY` | required | Anthropic API key |
-| `FOREMAN_REPO` | required | `owner/repo` format |
-| `POLL_INTERVAL` | `60` | Seconds between passes |
-| `BRAINSTORM_THRESHOLD` | `2` | If queue < this, brainstorm |
-| `BRAINSTORM_MAX_DRAFTS` | `5` | Max drafts per brainstorm |
-| `COST_CEILING_USD` | `5.0` | Daily spend limit |
-| `MODEL_REFINE` | `claude-sonnet-4-20250514` | Model for refinement |
-| `MODEL_BRAINSTORM` | `claude-sonnet-4-20250514` | Model for brainstorm |
-
-## What happens next
-
-The agent will refine its own tasks, then brainstorm new ones. You approve
-the drafts, and the cycle continues. Over time, the agent builds out:
-
-1. Telegram bot (so you can manage it from your phone)
-2. Real-time dashboard (wired to live agent state)
-3. Code implementation mode (auto-PRs)
-4. Multi-agent orchestration
-
-See [VISION.md](./VISION.md) for the full roadmap.
+- [`PHILOSOPHY.md`](./PHILOSOPHY.md) — the constitution
+- [`VISION.md`](./VISION.md) — full roadmap and architecture
+- [`config.yml`](./config.yml) — organism configuration
