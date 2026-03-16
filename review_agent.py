@@ -483,7 +483,7 @@ class PRReviewer:
             # --- Pre-check: Test Presence (Issue #57) ---
             test_report = self._validate_test_presence(pr, files)
             if test_report:
-                log.info(f"  ⚠️ Test presence warning for PR #{pr.number} — requesting changes.")
+                log.info(f"  ⚠️ Test presence warning for PR #{pr.number} — posting comment.")
                 
                 existing_reviews = list(pr.get_reviews())
                 already_reviewed = any(
@@ -494,7 +494,7 @@ class PRReviewer:
                 
                 if not already_reviewed:
                     if not self.dry_run:
-                        pr.create_review(body=test_report + BOT_SIGNATURE, event="REQUEST_CHANGES")
+                        pr.create_review(body=test_report + BOT_SIGNATURE, event="COMMENT")
                 self.stats["reviewed"] += 1
                 return True
             # --------------------------------------------
