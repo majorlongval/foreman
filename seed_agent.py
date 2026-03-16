@@ -37,8 +37,8 @@ MAX_OPEN_DRAFTS = int(os.environ.get("MAX_OPEN_DRAFTS", "10"))
 COST_CEILING_USD = float(os.environ.get("COST_CEILING_USD", "5.0"))
 
 # Promotion logic
-AUTO_PROMOTE_DELAY_HOURS = float(os.environ.get("AUTO_PROMOTE_DELAY_HOURS", "2.0"))
-AUTO_PROMOTE_MAX_PER_CYCLE = int(os.environ.get("AUTO_PROMOTE_MAX_PER_CYCLE", "3"))
+AUTO_PROMOTE_DELAY_HOURS = float(os.environ.get("AUTO_PROMOTE_DELAY_HOURS", "24.0"))
+AUTO_PROMOTE_MAX_PER_CYCLE = int(os.environ.get("AUTO_PROMOTE_MAX_PER_CYCLE", "10"))
 
 # Routing profile: "cheap", "balanced", or "quality"
 ROUTING_PROFILE = os.environ.get("ROUTING_PROFILE", "balanced")
@@ -147,11 +147,11 @@ class GitHubClient:
             raise
 
     def get_auto_refined_issues(self):
-        """Get open issues labeled 'auto-refined', paginated (don't exhaust all pages)."""
+        """Get open issues labeled 'auto-refined', paginated."""
         try:
             return self.repo.get_issues(
                 state="open",
-                labels=[LABEL_AUTO_REFINED],
+                labels=[self.repo.get_label(LABEL_AUTO_REFINED)],
                 sort="created",
                 direction="asc",
             )
@@ -366,44 +366,55 @@ class ForemanAgent:
                     log.info(f"  ⏩ Skipping #{issue.number} — has 'hold' label")
                     continue
                 
-                # Check age
-                created_at = issue.created_at
-                if created_at.tzinfo is None:
-                    created_at = created_at.replace(tzinfo=timezone.utc)
-                
-                age_hours = (now - created_at).total_seconds() / 3600
-                
-                if age_hours < AUTO_PROMOTE_DELAY_HOURS:
-                    log.info(f"  ⏳ Skipping #{issue.number} — only {age_hours:.1f}h old (threshold {AUTO_PROMOTE_DELAY_HOURS}h)")
-                    continue
-                
-                log.info(f"  ⏫ Promoting #{issue.number} to ready ({age_hours:.1f}h old)")
-                
-                if self.dry_run:
-                    log.info(f"  [DRY RUN] Would promote #{issue.number} and send notification")
-                else:
-                    try:
+                # We check the timeline events to find when 'auto-refined' was added
+                # to ensure we respect the full cooling period since refinement.
+                try:
+                    events = issue.get_events()
+                    labeled_at = None
+                    for event in events:
+                        if event.event == "labeled" and event.label and event.label.name == LABEL_AUTO_REFINED:
+                            # Keep looking for the LATEST time it was labeled this way
+                            labeled_at = event.created_at
+                    
+                    if not labeled_at:
+                        # Fallback to issue creation time if no event found
+                        labeled_at = issue.created_at
+                    
+                    if labeled_at.tzinfo is None:
+                        labeled_at = labeled_at.replace(tzinfo=timezone.utc)
+                        
+                    age_hours = (now - labeled_at).total_seconds() / 3600
+                    
+                    if age_hours < AUTO_PROMOTE_DELAY_HOURS:
+                        log.info(f"  ⏳ Skipping #{issue.number} — only {age_hours:.1f}h since refined (threshold {AUTO_PROMOTE_DELAY_HOURS}h)")
+                        continue
+                        
+                    log.info(f"  ⏫ Promoting #{issue.number} to ready ({age_hours:.1f}h old)")
+                    
+                    if self.dry_run:
+                        log.info(f"  [DRY RUN] Would promote #{issue.number} and send notification")
+                    else:
                         # Relabel
                         issue.remove_from_labels(LABEL_AUTO_REFINED)
                         issue.add_to_labels(LABEL_READY)
                         
                         # Comment
                         issue.create_comment(
-                            f"⏫ Auto-promoted to `ready` after {AUTO_PROMOTE_DELAY_HOURS}h delay.\n\n"
-                            f"Implementation agent will pick this up soon. Add `{LABEL_HOLD}` label to pause."
+                            "Automated Promotion: This issue has passed the 24-hour review period and is now ready for development."
                         )
                         
                         # Notify
                         tg(f"⏫ Auto-promoted #{issue.number} to <b>ready</b>: {issue.title}")
-                    except Exception as e:
-                        log.error(f"  ❌ Failed to promote #{issue.number}: {e}")
-                        continue
-                
-                promoted_count += 1
-                self.stats["promoted"] += 1
+                    
+                    promoted_count += 1
+                    self.stats["promoted"] += 1
+                    
+                except Exception as inner_e:
+                    log.error(f"  ❌ Error processing #{issue.number} for promotion: {inner_e}")
+                    continue
 
         except Exception as e:
-            log.error(f"Error during auto-promotion: {e}")
+            log.error(f"Error during auto-promotion search: {e}")
             
         return promoted_count
 
@@ -665,10 +676,6 @@ def main():
     if not REPO_NAME:
         log.error("❌ FOREMAN_REPO not set (e.g. 'youruser/foreman')")
         sys.exit(1)
-
-    # API keys are validated lazily when a backend is first used.
-    # This means you only need keys for providers you actually route to.
-    # e.g. ROUTING_PROFILE=cheap with all-Gemini routing only needs GEMINI_API_KEY.
 
     github = GitHubClient(GITHUB_TOKEN, REPO_NAME, dry_run=args.dry_run)
     agent = ForemanAgent(github, dry_run=args.dry_run, once=args.once)
