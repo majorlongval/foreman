@@ -133,19 +133,8 @@ def test_create_draft_issues_dry_run(mock_github):
 def test_auto_promote_refined_issues_success(base_agent):
     now = datetime.now(timezone.utc)
     
-    issue_old = make_issue(1, "Old Issue", [seed_agent.LABEL_AUTO_REFINED])
-    event_old = MagicMock()
-    event_old.event = "labeled"
-    event_old.label.name = seed_agent.LABEL_AUTO_REFINED
-    event_old.created_at = now - timedelta(hours=25)
-    issue_old.get_events.return_value = [event_old]
-    
-    issue_new = make_issue(2, "New Issue", [seed_agent.LABEL_AUTO_REFINED])
-    event_new = MagicMock()
-    event_new.event = "labeled"
-    event_new.label.name = seed_agent.LABEL_AUTO_REFINED
-    event_new.created_at = now - timedelta(hours=2)
-    issue_new.get_events.return_value = [event_new]
+    issue_old = make_issue(1, "Old Issue", [seed_agent.LABEL_AUTO_REFINED], created_at=now - timedelta(hours=25))
+    issue_new = make_issue(2, "New Issue", [seed_agent.LABEL_AUTO_REFINED], created_at=now - timedelta(hours=2))
     
     base_agent.github.get_auto_refined_issues = MagicMock(return_value=[issue_old, issue_new])
     
@@ -160,12 +149,7 @@ def test_auto_promote_refined_issues_success(base_agent):
 
 def test_auto_promote_skips_hold_label(base_agent):
     now = datetime.now(timezone.utc)
-    issue_hold = make_issue(1, "Hold Issue", [seed_agent.LABEL_AUTO_REFINED, seed_agent.LABEL_HOLD])
-    event_old = MagicMock()
-    event_old.event = "labeled"
-    event_old.label.name = seed_agent.LABEL_AUTO_REFINED
-    event_old.created_at = now - timedelta(hours=25)
-    issue_hold.get_events.return_value = [event_old]
+    issue_hold = make_issue(1, "Hold Issue", [seed_agent.LABEL_AUTO_REFINED, seed_agent.LABEL_HOLD], created_at=now - timedelta(hours=25))
     
     base_agent.github.get_auto_refined_issues = MagicMock(return_value=[issue_hold])
     
