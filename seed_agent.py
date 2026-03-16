@@ -156,8 +156,8 @@ class GitHubClient:
                 direction="asc",
             )
         except Exception as e:
-            log.error(f"Error fetching auto-refined issues: {e}")
-            return []
+            log.error(f"Failed to fetch auto-refined issues: {e}")
+            raise
 
     def get_all_open_issues(self) -> list:
         """Get all open issues for context (brainstorm dedup)."""
@@ -369,16 +369,7 @@ class ForemanAgent:
                 # We check the timeline events to find when 'auto-refined' was added
                 # to ensure we respect the full cooling period since refinement.
                 try:
-                    events = issue.get_events()
-                    labeled_at = None
-                    for event in events:
-                        if event.event == "labeled" and event.label and event.label.name == LABEL_AUTO_REFINED:
-                            # Keep looking for the LATEST time it was labeled this way
-                            labeled_at = event.created_at
-                    
-                    if not labeled_at:
-                        # Fallback to issue creation time if no event found
-                        labeled_at = issue.created_at
+                    labeled_at = issue.created_at
                     
                     if labeled_at.tzinfo is None:
                         labeled_at = labeled_at.replace(tzinfo=timezone.utc)
