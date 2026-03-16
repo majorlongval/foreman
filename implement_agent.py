@@ -350,6 +350,11 @@ class ImplementAgent:
                     max_tokens=200,
                 )
                 content = impl_response.text
+                if content:
+                    content = content.strip()
+                    if content.startswith("```"):
+                        content = content.split("\n", 1)[1] if "\n" in content else content
+                        content = content.rsplit("```", 1)[0].strip()
                 if not content or not content.strip():
                     log.error(f"  LLM returned empty content for {file_spec['path']} — skipping")
                     self.stats["failed"] += 1
