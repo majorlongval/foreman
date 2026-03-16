@@ -1,30 +1,27 @@
-# Project: FOREMAN — Self-Improving Autonomous Dev Pipeline
+# Project: FOREMAN — Self-Growing Autonomous Dev Organism
 
 ## Mission
 
-FOREMAN is a self-growing software system. Like a plant, it only needs a daily
-budget to run. It decides what to work on, writes the code, reviews it, fixes it,
-and ships it — on its own.
+FOREMAN is a self-growing software organism. Given a daily budget (energy), it
+decides what to work on, writes the code, reviews it, fixes it, and ships it.
 
-The human role is: set the budget, read the Telegram updates, occasionally redirect
-via chat. That's it.
+The human role is: set the budget, approve PRs (natural selection), and
+occasionally redirect via Telegram. That's it.
 
-The system bootstraps itself: it creates, refines, and works on the very tasks
-that define how to build... itself.
+Budget is energy. PR approval is natural selection. Growth is purpose.
 
 ## Principles
 
 1. **Budget is the throttle** — The daily API spend ceiling is the primary human
    control surface. Everything else runs autonomously within that limit.
 2. **Minimal human surface** — The only justified human touchpoints are: (a) setting
-   direction via VISION.md or Telegram, (b) emergency override. Routine approvals
-   are a failure mode, not a feature.
+   direction via VISION.md or Telegram, (b) PR approval, (c) emergency override.
 3. **Cost-aware** — Track API spend per agent per session. Route to cheapest model
-   that can handle the task.
+   that can handle the task. Log all costs to shared memory.
 4. **Bootstrap-first** — The system builds itself. Every feature ships through the
    pipeline it creates.
 5. **Auditable** — Every issue links to its origin. Every agent action is logged.
-   The full history is reconstructable from GitHub Issues alone.
+   The full history is reconstructable from GitHub alone.
 6. **Non-destructive by default** — Never modify existing issues. Create new ones,
    tag originals as `deprecated`. Every action is reversible.
 
@@ -32,69 +29,67 @@ that define how to build... itself.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    FOREMAN                           │
+│                    FOREMAN ORGANISM                  │
 │                                                     │
 │  ┌───────────┐  ┌──────────┐  ┌──────────────────┐ │
-│  │ REPL Loop │  │ Telegram │  │ React Dashboard  │ │
-│  │ (Python)  │◄─┤ Bot      │  │ (monitoring)     │ │
+│  │ Brain Loop │  │ Telegram │  │   config.yml     │ │
+│  │ (schedule) │◄─┤ Bot      │  │ (organism DNA)   │ │
 │  │           │  │ (cmd/ctrl)│  │                  │ │
 │  └─────┬─────┘  └──────────┘  └──────────────────┘ │
 │        │                                            │
 │        ▼                                            │
 │  ┌──────────────────────────────────────────┐       │
-│  │           GitHub Issues                   │       │
-│  │  (task store + audit trail)               │       │
+│  │            Council                        │       │
+│  │  Reads config, memory, issues, PRs        │       │
+│  │  Decides what to do next                  │       │
+│  │  Delegates to agents                      │       │
 │  └──────────────────────────────────────────┘       │
 │        │                                            │
 │        ▼                                            │
 │  ┌──────────────────────────────────────────┐       │
-│  │           Claude API                      │       │
-│  │  (intelligence layer)                     │       │
-│  │  Foreman routing: opus / sonnet / haiku   │       │
+│  │            Agents                         │       │
+│  │  Gandalf (Scout) — explore, brainstorm    │       │
+│  │  Gimli (Builder) — implement, fix         │       │
+│  │  Galadriel (Critic) — review, quality     │       │
+│  │  Samwise (Gardener) — maintain, clean     │       │
+│  └──────────────────────────────────────────┘       │
+│        │                                            │
+│        ▼                                            │
+│  ┌──────────────────────────────────────────┐       │
+│  │            Tools                          │       │
+│  │  GitHub API, LLM providers, Telegram      │       │
+│  │  Memory read/write, Cost tracking         │       │
 │  └──────────────────────────────────────────┘       │
 └─────────────────────────────────────────────────────┘
 ```
 
 ## Tech Stack
 
-- **Runtime**: Python 3.11+ in Docker container
+- **Runtime**: Python 3.11+, GitHub Actions
 - **Task Store**: GitHub Issues via GitHub API (PyGithub)
-- **AI**: Anthropic Claude API (anthropic Python SDK)
-- **Hosting**: Railway or Fly.io (free/cheap tier)
+- **AI**: Provider-agnostic via LiteLLM (Gemini, Anthropic, OpenAI-compatible)
+- **Configuration**: `config.yml` (organism DNA — models, budget, agent roster)
 - **Human Interface**: Telegram Bot (python-telegram-bot)
-- **Dashboard**: React app (separate service, reads agent state)
-- **CI/CD**: GitHub Actions
+- **CI/CD**: GitHub Actions (brain loop, agent cycles)
 
-## Refined Ticket Structure
+## Agents
 
-Every refined ticket MUST include these sections:
+| Agent | Role | Identity | Purpose |
+|-------|------|----------|---------|
+| Gandalf | Scout | `agents/gandalf.md` | Explore codebase, brainstorm ideas, find opportunities |
+| Gimli | Builder | `agents/gimli.md` | Implement features, fix code, open PRs |
+| Galadriel | Critic | `agents/galadriel.md` | Review PRs, enforce quality, approve/reject |
+| Samwise | Gardener | `agents/samwise.md` | Maintain tests, docs, memory, backlog hygiene |
 
-```markdown
-## Summary
-One-line description of what this task accomplishes.
+Legacy agents (being absorbed into organism):
 
-## Acceptance Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] ...
-
-## Steps to Reproduce (bugs only)
-1. Step 1
-2. Step 2
-3. Expected vs actual behavior
-
-## Component/Area
-Which part of the system this touches (e.g., agent-loop, telegram-bot,
-dashboard, github-integration, infrastructure).
-
-## Subtasks
-- [ ] Subtask 1
-- [ ] Subtask 2
-
-## Complexity Estimate
-T-shirt size: XS / S / M / L / XL
-Estimated API cost: low / medium / high
-```
+| Agent | File | Purpose |
+|-------|------|---------|
+| Seed / Refiner | `seed_agent.py` | Refines & brainstorms issues |
+| Implementer | `implement_agent.py` | Reads tickets, writes code, opens PRs |
+| PR Reviewer | `review_agent.py` | Reviews PRs, posts structured review |
+| Fix Agent | `fix_agent.py` | Reads review, pushes search/replace patches |
+| Brain | `foreman_brain.py` | Telegram bot with Claude + GitHub tools |
 
 ## Issue Lifecycle
 
@@ -123,37 +118,22 @@ Estimated API cost: low / medium / high
     label: "ready"
     (implementation queue)
         │
-   IMPLEMENT (human or agent)
+   IMPLEMENT (agent)
         │
         ├── creates PR → REVIEW AGENT posts comments
         └── on merge → issue closed
 ```
 
-Filtering convention:
-- Open issues = active work
-- Closed + `refined-out` = originals that spawned better versions (audit trail)
-- Closed (no special label) = completed work
-
-## Agents
-
-| Agent | File | Purpose | Runs |
-|-------|------|---------|------|
-| Seed / Refiner | `seed_agent.py` | Refines & brainstorms issues | Continuous loop |
-| PR Reviewer | `review_agent.py` | Reviews PRs, posts comments | Continuous loop |
-| Foreman (planned) | `foreman.py` | Telegram cmd/ctrl + orchestration | Continuous loop |
-
 ## Safety Rails
 
-- **Cost ceiling**: Hard stop at configurable daily limit. Agent parks itself
-  and alerts via Telegram. This is the primary safety control.
-- **Infinite loop guard**: Agents only touch issues in their designated label state.
-  No agent processes its own output label.
+- **Cost ceiling**: Hard stop at configurable daily limit (`config.yml`). Agent
+  parks itself and alerts via Telegram.
+- **PR approval gate**: Every code change requires Jord's approval. This is
+  natural selection — bad mutations get rejected.
 - **Syntax check before commit**: All Python files validated with `ast.parse()`
   before being pushed to a branch.
 - **Fix cycle cap**: Fix agent stops after N review rounds (default 5) and
   escalates with `needs-human` label.
-- **Auto-merge threshold**: Only merge when review confidence > threshold AND
-  zero open CRITICAL issues. When in doubt, escalate.
 - **Duplicate detection**: Before creating a draft, check semantic similarity
   against all open issues. Skip if match > threshold.
 - **Brainstorm throttle**: Max N draft issues per cycle. Hard stop when
@@ -162,79 +142,44 @@ Filtering convention:
 
 ## Roadmap
 
-### Phase 1 — Seed ✅ DONE
+### Phase 1 — Seed (DONE)
 Seed agent, refine loop, brainstorm grounded in VISION.md, GitHub Issues integration,
 Telegram notifications, cost ceiling, duplicate detection.
 
-### Phase 2 — Implementation ✅ DONE
-Implement agent (reads refined ticket → writes code → opens PR), review agent
-(posts structured review), fix agent (reads review → pushes search/replace patches),
-Foreman Brain (Telegram bot with Claude + GitHub tools for conversational control).
+### Phase 2 — Implementation (DONE)
+Implement agent, review agent, fix agent, Foreman Brain (Telegram bot with
+Claude + GitHub tools for conversational control).
 
-### Phase 3 — Close the Loop (CURRENT)
-> Goal: Remove the two remaining manual steps so the system runs fully on budget alone.
+### Phase 3 — Organism Redesign (CURRENT)
+> Goal: Transform from a pipeline of scripts into a self-governing organism.
 
-**Gap 1: Auto-promote refined issues to `ready`**
-- After refinement, issues sit at `auto-refined` waiting for a human to label them `ready`
-- Seed agent (or a scheduler) should auto-promote after a confidence/age threshold
-- Human can still block via Telegram or by adding a `hold` label
+- **Constitution**: `PHILOSOPHY.md` — shared values and rules every agent reads
+- **Exposed DNA**: `config.yml` — budget, models, agent roster (agents can propose changes)
+- **Agent identities**: Named characters with distinct roles and personalities
+- **Memory system**: Private per-agent memory + shared commons
+- **Council**: Deliberation step where agents decide what to do next
+- **Brain loop**: Scheduled cycle that reads state, runs council, delegates work
+- **Self-improvement**: Agents can propose changes to their own code, config, and roster
 
-**Gap 2: Auto-merge with confidence scoring**
-- After fix agent runs, a PR with no CRITICAL/IMPORTANT issues and passing syntax checks
-  should merge itself
-- Review agent needs to emit a machine-readable confidence score
-- Auto-merge only when score > threshold AND no open CRITICAL issues
+### Phase 4 — Scale & Evolve
+> Goal: The organism runs 24/7, grows capabilities, and generates value.
 
-**Gap 3: Backlog hygiene agent**
-- Periodically audit open issues against merged PRs and current codebase
-- Close issues that have already been implemented
-- Flag issues that are now redundant given what was built
-- Prevents backlog from rotting as the system grows
+- Cost dashboard — per agent, per day, trend over time
+- Velocity metrics — issues closed per week, PR cycle time
+- Budget auto-scaling — spend more on active days, less on idle
+- New agent types as the organism discovers needs
+- Multi-repo support
+- External tool integration (web search, API exploration)
 
-### Phase 4 — Scale & Observe
-> Goal: The system runs 24/7 with a daily budget, visible health metrics.
+## Cost Targets
 
-- [ ] Deploy to Railway/Fly.io (persistent process, not GitHub Actions)
-- [ ] Cost dashboard — per agent, per day, trend over time
-- [ ] Velocity metrics — issues closed per week, PR cycle time
-- [ ] Budget auto-scaling — spend more on days with big PRs, less on idle days
-- [ ] Multi-repo support
-
-## Agent Evolution Path
-
-The agents graduate in capability:
-
-```
-REFINE (now)          → reads ticket, writes better ticket
-  ↓
-IMPLEMENT (phase 2)   → reads ticket, writes code, opens PR
-  ↓
-BRAINSTORM (phase 3)  → multi-turn planning, generates roadmap
-  ↓
-ORCHESTRATE (phase 4) → manages other agents, routes work
-```
-
-Each level builds on the last. Refinement teaches the system what good
-tickets look like. Implementation teaches it what good code looks like.
-Brainstorming teaches it what good plans look like. Orchestration is
-just routing to the right capability at the right time.
-
-## Constraints & Non-Goals
-
-- **NOT** building a general-purpose agent framework (no OpenClaw)
-- **NOT** replacing human judgment on architecture decisions
-- **NOT** auto-merging code without human review (until Phase 4+)
-- **NOT** running untrusted third-party skills/plugins
-- Target: **< $5/day** API spend during POC
-- Target: **< 2 min** per ticket refinement
-- Target: **> 80%** of refined tickets usable without human edits
-- Target: **< $0.50** per implemented PR (average)
+- **< $5/day** API spend during growth phase
+- **< $0.50** per implemented PR (average)
+- **< 2 min** per ticket refinement
 
 ## Context
 
-Personal POC built by Jordan. The goal is a system that grows like a plant:
-given a daily budget, it decides what to build, builds it, and ships it.
-The human sets direction (this file + Telegram) and watches it grow.
-
-If successful, the pattern could be adapted for Robotiq (Jira + GitLab) to
-automate the helpdesk → ticket → resolution pipeline for palletizer installations.
+Personal project built by Jordan (Jord). The goal is a system that grows like
+a living organism: given a daily budget, it decides what to build, builds it,
+reviews it, and ships it. The human sets direction (this file + Telegram),
+approves PRs (natural selection), and watches it grow.
