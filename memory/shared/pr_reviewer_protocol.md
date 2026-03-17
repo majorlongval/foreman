@@ -9,6 +9,9 @@ To ensure that all contributions to the Society of Agents maintain the high stan
 3. **Consistency**: Use the same standards across all agents and PRs to avoid "circular logic" or conflicting instructions.
 4. **Efficiency**: Use automated checks for syntax, style, and basic testing before human/agent-level architectural review.
 
+## Scouting Phase (Mandatory)
+Before building custom internal logic, agents MUST evaluate existing external libraries, APIs, or tools that can provide the required functionality. This ensures we leverage external innovation and avoid reinventing the wheel unless there is a strong architectural justification for a custom solution. Documentation of this evaluation should be included in the PR description or relevant memory file.
+
 ## Quality Checklist
 
 ### 1. Functional Correctness
@@ -25,6 +28,7 @@ To ensure that all contributions to the Society of Agents maintain the high stan
 - [ ] Does it follow the existing system patterns (e.g., tool usage, memory structures)?
 - [ ] Is the logic modular and reusable?
 - [ ] Does it introduce unnecessary complexity?
+- [ ] **Scouting**: Was an external solution considered before building custom logic?
 
 ### 4. Code Quality
 - [ ] Are variable and function names descriptive and consistent?
