@@ -17,7 +17,7 @@ from typing import List
 
 from brain.council import CouncilResult
 from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
-from llm_client import estimate_cost
+from brain.llm_client import estimate_cost
 
 log = logging.getLogger("foreman.brain.executor")
 

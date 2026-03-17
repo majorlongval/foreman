@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from brain.config import AgentConfig, Config
 from brain.survey import SurveyResult
-from llm_client import estimate_cost
+from brain.llm_client import estimate_cost
 
 log = logging.getLogger("foreman.brain.council")
 

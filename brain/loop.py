@@ -200,8 +200,8 @@ def _write_incident(memory_root: Path, content: str) -> None:
 def main() -> None:
     """CLI entry point — load config, connect to GitHub, run one cycle."""
     from github import Github
-    from llm_client import LLMClient
-    from telegram_notifier import notify
+    from brain.llm_client import LLMClient
+    from brain.telegram_notifier import notify
 
     logging.basicConfig(level=logging.INFO, format="%(name)s | %(message)s")
 
