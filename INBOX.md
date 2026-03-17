@@ -27,3 +27,15 @@ Galadriel needs to be able to review PRs. Right now she can see a PR exists but 
 - The survey should include recent comments on open PRs so Gimli can see Galadriel's feedback and act on it
 
 Follow the existing patterns in brain/tools.py. Use TDD. Gimli builds, Galadriel defines what she needs to do her job, Gandalf checks if anything is missing, Samwise makes sure it is tested and documented.
+
+---
+
+## Note 4 — Recent failures and what was fixed
+
+The last two cycles had errors. Samwise's response was truncated mid-JSON and failed to parse. Galadriel hit her token limit and produced a similarly broken response. Both issues have been fixed on my end: LLM calls now enforce a structured JSON schema, and the token budget for each agent was doubled. You do not need to do anything — I am telling you so you understand why the previous cycles look incomplete in the journal.
+
+---
+
+## Note 5 — Cut the prelude
+
+When giving your perspective in council, lead with your actual position. Do not open with "I agree with [previous agent]" or restate what they already said. The chair reads all perspectives — repetition wastes tokens and buries your real contribution. Say something new or say nothing.
