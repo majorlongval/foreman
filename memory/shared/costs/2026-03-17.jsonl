@@ -46,3 +46,4 @@
 {"timestamp": "2026-03-17T22:34:12.437151+00:00", "agent": "galadriel", "model": "gemini/gemini-3-flash-preview", "action": "execution", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0042171}
 {"timestamp": "2026-03-17T22:34:20.376412+00:00", "agent": "samwise", "model": "gemini/gemini-3-flash-preview", "action": "execution", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.00431655}
 {"timestamp": "2026-03-17T22:34:20.376622+00:00", "agent": "samwise", "model": "gemini/gemini-3-flash-preview", "action": "council", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0075381}
+{"timestamp": "2026-03-17T23:05:36.029272+00:00", "agent": "gandalf", "model": "gemini/gemini-3-flash-preview", "action": "council", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.00705885}
