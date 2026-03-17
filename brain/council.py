@@ -170,7 +170,7 @@ def run_council(
                 model=config.model_council,
                 system=system,
                 message=user,
-                max_tokens=1024,
+                max_tokens=2048,
                 response_format=AgentResponse,
             )
             total_cost += estimate_cost(
