@@ -1,5 +1,5 @@
-# Agent Cost Tracking
+# Budget Tracking
 
-| Date | Agent | Action | Cost (Estimated) |
-|------|-------|--------|------------------|
-| 2025-05-14 | Executor | Initialized cost tracking | 0.00 |
+| Date | Total Cost (USD) | Remaining Budget | Notes |
+|------|------------------|------------------|-------|
+| 2025-05-14 | 0.00 | 50.00 | Initialized |
