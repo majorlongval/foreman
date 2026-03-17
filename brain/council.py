@@ -73,6 +73,10 @@ changing architecture), flag it for Jord instead of acting.
 
 The agents in this council are: {agent_names}
 
+CRITICAL: The "assignments" field is REQUIRED and must contain a task for EVERY agent. \
+If an agent has no specific task, assign them a review or documentation task. \
+Never leave "assignments" empty.
+
 You MUST respond with ONLY a JSON object, no other text:
 {{"decision": "what we will do and why", \
 "action_plan": "overall summary of the plan", \
@@ -222,6 +226,22 @@ def run_council(
         action_plan = parsed.action_plan
         assignments = parsed.assignments
         log.info(f"[{chair.name} / chair] Decision: {decision}")
+
+        # Validate assignments — if chair didn't assign tasks, fall back
+        expected_names = {a.name for a in agents}
+        if not assignments:
+            log.warning(
+                f"Chair returned empty assignments — falling back to "
+                f"action_plan for all agents. Raw response: {response.text[:500]}"
+            )
+            assignments = {a.name: action_plan for a in agents}
+        else:
+            missing = expected_names - set(assignments.keys())
+            if missing:
+                log.warning(f"Chair missed assignments for: {missing}")
+                for name in missing:
+                    assignments[name] = action_plan
+
         for agent_name, task in assignments.items():
             log.info(f"  → {agent_name}: {task}")
         if parsed.flag_for_jord:
