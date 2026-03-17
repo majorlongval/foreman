@@ -1,4 +1,5 @@
-# Cost Log
+# Agent Cost Tracking
 
-| Date       | Agent         | Task Description              | Tokens Used | Cost ($) |
-|------------|---------------|-------------------------------|-------------|----------|
+| Date | Agent | Action | Cost (Estimated) |
+|------|-------|--------|------------------|
+| 2025-05-14 | Executor | Initialized cost tracking | 0.00 |
