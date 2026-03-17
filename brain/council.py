@@ -211,7 +211,7 @@ def run_council(
             model=config.model_council,
             system=system,
             message=user,
-            max_tokens=2048,
+            max_tokens=4096,  # Chair needs more tokens: decision + action_plan + assignments for all agents
             response_format=ChairResponse,
         )
         total_cost += estimate_cost(
