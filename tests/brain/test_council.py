@@ -250,8 +250,8 @@ class TestRunCouncil:
         assert "failed" in result.perspectives[0].perspective.lower()
         assert "failed" in result.decision.lower()
 
-    def test_chair_uses_4096_max_tokens(self, tmp_path: Path) -> None:
-        """Chair call must use max_tokens=4096 — 2048 caused truncated JSON once assignments were added."""
+    def test_chair_uses_8192_max_tokens(self, tmp_path: Path) -> None:
+        """Chair call must use max_tokens=8192 — 4096 caused truncated JSON in production."""
         agents = make_agents()[:1]
         journal_dir = tmp_path / "journal"
         journal_dir.mkdir()
@@ -271,7 +271,7 @@ class TestRunCouncil:
             llm=mock_llm, journal_dir=journal_dir,
         )
         chair_call = mock_llm.complete.call_args_list[-1]
-        assert chair_call.kwargs.get("max_tokens") == 4096
+        assert chair_call.kwargs.get("max_tokens") == 8192
 
     def test_agent_deliberation_uses_2048_max_tokens(self, tmp_path: Path) -> None:
         """Agent calls must use max_tokens=2048 — 1024 caused truncated JSON in production."""
