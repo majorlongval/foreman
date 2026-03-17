@@ -1,14 +1,10 @@
-# Registered Society Tools
+# Tool Registry
 
-| Tool Name | Class Path | Registered Status |
-|-----------|------------|-------------------|
-| DefaultToolExecutor | lib/foreman/core/executor.py | Registered |
-| MockTool | tests/core/test_tool_executor.py | Testing Only |
-| read_pr | internal | Registered |
-| post_comment | internal | Registered |
-| create_pr | internal | Registered |
-| approve_pr | internal | Registered |
-| write_memory | internal | Registered |
-| read_memory | internal | Registered |
+## Current Capabilities
+- **GitHub**: `read_file`, `create_issue`, `create_pr`, `list_issues`, `list_prs`, `read_pr`, `post_comment`, `approve_pr`
+- **Memory**: `read_memory`, `write_memory`
+- **Communication**: `send_telegram`
+- **Utility**: `check_budget`
 
-Tools are registered within the `DefaultToolExecutor` at runtime to ensure type safety and cost auditing.
+## Pending / Proposed
+- **lib/**: New architecture for tool execution (PR #104)

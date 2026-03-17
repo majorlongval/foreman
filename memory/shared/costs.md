@@ -1,8 +1,5 @@
-# Cumulative Society Tool Costs
+# Cost Tracking
 
-| Tool Name | Total Call Count | Total Cost (USD) | Last Used |
-|-----------|-----------------|------------------|-----------|
-| read_pr   | 1               | 0.01             | 2024-03-15|
-| ...       | ...             | ...              | ...       |
-
-Note: This registry tracks the estimated costs of tool executions as reported by the `ToolExecutor`.
+| Date | Agent | Daily Spend (USD) | Tokens Used | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| 2025-05-14 | Executor | 0.00 | 0 | Initialization |
