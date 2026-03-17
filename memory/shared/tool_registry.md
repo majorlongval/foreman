@@ -1,15 +1,14 @@
-# Tool Registry
+# Registered Society Tools
 
-## Core Tools
-- `read_file`: Read a file from the repository.
-- `create_issue`: Create a new GitHub issue.
-- `create_pr`: Create a branch, commit files, and open a pull request.
-- `read_memory`: Read a memory file.
-- `write_memory`: Write a memory file.
-- `send_telegram`: Send a message to Jord via Telegram.
-- `check_budget`: Check remaining budget for today.
-- `list_issues`: List open GitHub issues.
-- `list_prs`: List open pull requests.
-- `read_pr`: Read a pull request.
-- `post_comment`: Post a comment on a pull request.
-- `approve_pr`: Approve a pull request.
+| Tool Name | Class Path | Registered Status |
+|-----------|------------|-------------------|
+| DefaultToolExecutor | lib/foreman/core/executor.py | Registered |
+| MockTool | tests/core/test_tool_executor.py | Testing Only |
+| read_pr | internal | Registered |
+| post_comment | internal | Registered |
+| create_pr | internal | Registered |
+| approve_pr | internal | Registered |
+| write_memory | internal | Registered |
+| read_memory | internal | Registered |
+
+Tools are registered within the `DefaultToolExecutor` at runtime to ensure type safety and cost auditing.
