@@ -20,8 +20,9 @@ from brain.llm_client import estimate_cost
 
 log = logging.getLogger("foreman.brain.executor")
 
-# Max tool-use rounds per agent to prevent runaway loops
-DEFAULT_MAX_ROUNDS = 5
+# Max tool-use rounds per agent to prevent runaway loops.
+# Raised from 5 to 8 so agents have enough room to complete multi-step tasks with deliverables.
+DEFAULT_MAX_ROUNDS = 8
 
 
 @dataclass
@@ -54,6 +55,7 @@ def execute_action(
     tool_ctx: ToolContext,
     model: str,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
+    deliverable: str = "",
 ) -> ExecutionResult:
     """Execute one agent's assigned task via LLM tool-use loop.
 
@@ -65,6 +67,7 @@ def execute_action(
         tool_ctx: Context for tool execution (repo, memory, budget, etc.)
         model: Model string for the LLM call
         max_rounds: Safety limit on tool-use rounds per agent
+        deliverable: Specific artifact this agent must produce (file, issue, PR, etc.)
 
     Returns:
         ExecutionResult with summary of what was done and total cost in USD
@@ -80,10 +83,23 @@ def execute_action(
         "Be precise and efficient — every tool call costs tokens.\n\n"
         "When you're done, respond with a brief summary of what you accomplished."
     )
+
+    # Build deliverable section — reminds the agent of the concrete output they owe
+    # and instructs them to record their work in their own memory file so the next
+    # cycle can see what was accomplished.
+    deliverable_section = (
+        f"\n\n## Required Deliverable\n"
+        f"You MUST produce: {deliverable}\n\n"
+        f"After completing your task, use write_memory to save a brief note about "
+        f"what you did to memory/{agent_name}/cycle_notes.md."
+        if deliverable else ""
+    )
+
     user = (
         f"## Council Decision\n{decision}\n\n"
-        f"## Your Task\n{task}\n\n"
-        "Execute your task using the available tools."
+        f"## Your Task\n{task}"
+        + deliverable_section
+        + "\n\nExecute your task using the available tools."
     )
 
     messages = [

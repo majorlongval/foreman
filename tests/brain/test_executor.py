@@ -181,3 +181,55 @@ class TestExecuteActionLLMFailure:
         )
         assert "error" in result.summary.lower()
         assert "API down" in result.summary
+
+
+class TestExecuteActionDeliverable:
+    def test_deliverable_in_user_message(self, tool_ctx: ToolContext) -> None:
+        """When a deliverable is provided, it must appear in the user message sent to the LLM."""
+        mock_llm = MagicMock()
+        response = MagicMock()
+        response.tool_calls = []
+        response.text = "Done."
+        response.input_tokens = 100
+        response.output_tokens = 50
+        mock_llm.complete_with_tools.return_value = response
+
+        execute_action(
+            task="Research models", agent_name="gandalf", decision="explore",
+            deliverable="Write findings to memory/gandalf/cycle_notes.md",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
+
+        call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
+        user_message = next(m for m in call_messages if m["role"] == "user")
+        assert "Write findings to memory/gandalf/cycle_notes.md" in user_message["content"]
+        assert "Required Deliverable" in user_message["content"]
+
+    def test_agent_memory_instruction_in_prompt(self, tool_ctx: ToolContext) -> None:
+        """The user prompt must instruct the agent to write to their own memory."""
+        mock_llm = MagicMock()
+        response = MagicMock()
+        response.tool_calls = []
+        response.text = "Done."
+        response.input_tokens = 100
+        response.output_tokens = 50
+        mock_llm.complete_with_tools.return_value = response
+
+        execute_action(
+            task="Research models", agent_name="gandalf", decision="explore",
+            deliverable="notes about models",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
+
+        call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
+        user_message = next(m for m in call_messages if m["role"] == "user")
+        # Should instruct the agent to write to their own memory
+        assert "memory/gandalf/cycle_notes.md" in user_message["content"]
+        assert "write_memory" in user_message["content"]
+
+
+class TestExecuteActionMaxRounds:
+    def test_default_max_rounds_is_8(self) -> None:
+        """DEFAULT_MAX_ROUNDS must be 8 — raised from 5 to give agents more room to act."""
+        from brain.executor import DEFAULT_MAX_ROUNDS
+        assert DEFAULT_MAX_ROUNDS == 8

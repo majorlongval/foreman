@@ -65,22 +65,29 @@ CHAIR_SYSTEM = """{philosophy}
 You are {chair_name}, the {chair_role}. \
 You are the chair for this council cycle. \
 Review all perspectives and synthesize them into a decision. \
-Then assign a specific, concrete task to EACH agent by name. \
-Every agent should have work to do — parallel action is faster than sequential.
+Then assign a specific, concrete task to EACH agent using phases.
+
+Phases let you control execution order:
+- Phase 1 agents run first (independent work in parallel)
+- Phase 2+ agents run after ALL earlier phases complete (can depend on phase 1 output)
+
+Every task MUST specify a concrete deliverable — a specific file written, \
+issue created, PR opened, or comment posted. Vague deliverables are not acceptable.
+Agents should write a note about their work to memory/{{agent_name}}/cycle_notes.md.
 
 If there is a disagreement about something risky (deleting code, \
 changing architecture), flag it for Jord instead of acting.
 
 The agents in this council are: {agent_names}
 
-CRITICAL: The "assignments" field is REQUIRED and must contain a task for EVERY agent. \
-If an agent has no specific task, assign them a review or documentation task. \
-Never leave "assignments" empty.
+CRITICAL: The "phases" field is REQUIRED and must contain at least one phase with \
+tasks for ALL agents. If an agent has no specific task, assign them a review or \
+documentation task. Never leave "phases" empty.
 
 You MUST respond with ONLY a JSON object, no other text:
 {{"decision": "what we will do and why", \
 "action_plan": "overall summary of the plan", \
-"assignments": {{{assignment_example}}}, \
+"phases": [{phase_example}], \
 "flag_for_jord": false, \
 "flag_reason": ""}}"""
 
@@ -101,11 +108,22 @@ class AgentResponse(BaseModel):
     proposed_action: str
 
 
+class AgentAssignment(BaseModel):
+    """One agent's assignment within a phase."""
+    agent: str       # agent name matching config
+    task: str        # specific work to do this cycle
+    deliverable: str # concrete artifact: file written, issue created, PR opened, etc.
+
+
 class ChairResponse(BaseModel):
-    """Expected JSON from the chair's decision call."""
+    """Expected JSON from the chair's decision call.
+
+    phases is a list of phases, each phase is a list of assignments.
+    Phases execute in order; assignments within a phase run independently.
+    """
     decision: str
     action_plan: str
-    assignments: Dict[str, str] = {}  # agent_name → specific task for this cycle
+    phases: List[List[AgentAssignment]] = []
     flag_for_jord: bool = False
     flag_reason: str = ""
 
@@ -145,7 +163,9 @@ class CouncilResult:
     decision: str
     action_plan: str
     cost_usd: float = 0.0
-    assignments: Dict[str, str] = field(default_factory=dict)  # agent_name → task
+    # Ordered phases of execution; each phase is a list of assignments that run independently.
+    # Phase N+1 starts only after phase N finishes (enabling agents to depend on prior output).
+    phases: List[List[AgentAssignment]] = field(default_factory=list)
 
 
 # ── Main entry point ──────────────────────────────────────────
@@ -224,33 +244,18 @@ def run_council(
         parsed = parse_chair_response(response.text)
         decision = parsed.decision
         action_plan = parsed.action_plan
-        assignments = parsed.assignments
+        phases = parsed.phases
         log.info(f"[{chair.name} / chair] Decision: {decision}")
-
-        # Validate assignments — if chair didn't assign tasks, fall back
-        expected_names = {a.name for a in agents}
-        if not assignments:
-            log.warning(
-                f"Chair returned empty assignments — falling back to "
-                f"action_plan for all agents. Raw response: {response.text[:500]}"
-            )
-            assignments = {a.name: action_plan for a in agents}
-        else:
-            missing = expected_names - set(assignments.keys())
-            if missing:
-                log.warning(f"Chair missed assignments for: {missing}")
-                for name in missing:
-                    assignments[name] = action_plan
-
-        for agent_name, task in assignments.items():
-            log.info(f"  → {agent_name}: {task}")
+        for phase_idx, phase in enumerate(phases):
+            for assignment in phase:
+                log.info(f"  → phase {phase_idx + 1} [{assignment.agent}]: {assignment.task} (deliverable: {assignment.deliverable})")
         if parsed.flag_for_jord:
             log.warning(f"[{chair.name} / chair] Flagged for Jord: {parsed.flag_reason}")
     except Exception as e:
         log.error(f"Chair {chair.name} decision failed: {e}")
         decision = f"Chair decision failed: {e}"
         action_plan = ""
-        assignments = {}
+        phases = []
 
     # Rotate chair for next cycle
     next_index = (chair_index + 1) % len(agents)
@@ -262,7 +267,7 @@ def run_council(
         decision=decision,
         action_plan=action_plan,
         cost_usd=total_cost,
-        assignments=assignments,
+        phases=phases,
     )
 
 
@@ -325,17 +330,33 @@ def _build_chair_prompt(
         for p in perspectives
     )
     agent_names = ", ".join(a.name for a in all_agents)
-    # Build example assignments so the LLM knows the exact format expected
-    assignment_example = ", ".join(
-        f'"{a.name}": "task for {a.name}"' for a in all_agents
-    )
+    # Build a concrete phases example so the LLM knows exactly what format to return.
+    # Two phases: first two agents in phase 1, rest in phase 2 (or all in one phase if <=2 agents).
+    if len(all_agents) <= 2:
+        phase1 = ", ".join(
+            f'{{"agent": "{a.name}", "task": "task for {a.name}", "deliverable": "memory/{a.name}/cycle_notes.md"}}'
+            for a in all_agents
+        )
+        phase_example = f"[{phase1}]"
+    else:
+        mid = len(all_agents) // 2
+        phase1 = ", ".join(
+            f'{{"agent": "{a.name}", "task": "task for {a.name}", "deliverable": "memory/{a.name}/cycle_notes.md"}}'
+            for a in all_agents[:mid]
+        )
+        phase2 = ", ".join(
+            f'{{"agent": "{a.name}", "task": "task for {a.name}", "deliverable": "memory/{a.name}/cycle_notes.md"}}'
+            for a in all_agents[mid:]
+        )
+        phase_example = f"[{phase1}], [{phase2}]"
+
     system = CHAIR_SYSTEM.format(
         philosophy=philosophy,
         identity=identity,
         chair_name=chair.name,
         chair_role=chair.role,
         agent_names=agent_names,
-        assignment_example=assignment_example,
+        phase_example=phase_example,
     )
     user = CHAIR_USER.format(
         survey_context=survey_context,

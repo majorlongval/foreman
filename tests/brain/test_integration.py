@@ -50,7 +50,12 @@ def full_env(tmp_path: Path):
     agent_resp.input_tokens = 100
     agent_resp.output_tokens = 50
     chair_resp = MagicMock()
-    chair_resp.text = '{"decision": "Research models", "action_plan": "List available models", "flag_for_jord": false, "flag_reason": ""}'
+    chair_resp.text = (
+        '{"decision": "Research models", "action_plan": "List available models",'
+        '"phases": [[{"agent": "gandalf", "task": "scout available models", "deliverable": "memory/gandalf/cycle_notes.md"},'
+        '{"agent": "gimli", "task": "log findings", "deliverable": "memory/gimli/cycle_notes.md"}]],'
+        '"flag_for_jord": false, "flag_reason": ""}'
+    )
     chair_resp.input_tokens = 200
     chair_resp.output_tokens = 100
 

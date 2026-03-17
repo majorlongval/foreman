@@ -92,15 +92,26 @@ def run_cycle(
         else:
             memory_summaries[agent.name] = "(no private memory yet)"
 
-    # Shared memory summary
-    shared_store = MemoryStore(memory_root, "shared")
+    # Shared memory summary — scan ALL subdirectories under memory/shared/, not just fixed ones.
+    # This lets agents add new shared memory categories (e.g. "plans", "notes") without needing
+    # code changes here. We collect up to 10 most-recent files across all subdirs + root .md files.
+    shared_root = memory_root / "shared"
     shared_parts = []
-    for subdir in ["decisions", "journal", "incidents"]:
-        files = shared_store.list_files("shared", subdirectory=subdir)
-        for f in files[:3]:
-            content = shared_store.read("shared", f"{subdir}/{f}")
-            if content:
-                shared_parts.append(f"## {subdir}/{f}\n{content}")
+    if shared_root.exists():
+        # Gather all .md files from every subdir + root-level files, sorted newest first
+        all_shared_files: list[tuple] = []
+        for item in shared_root.iterdir():
+            if item.is_dir():
+                for f in item.glob("*.md"):
+                    all_shared_files.append((f.stat().st_mtime, f, item.name))
+            elif item.suffix == ".md":
+                all_shared_files.append((item.stat().st_mtime, item, ""))
+        all_shared_files.sort(reverse=True)  # most-recent first
+        for _, file_path, subdir in all_shared_files[:10]:
+            rel = f"{subdir}/{file_path.name}" if subdir else file_path.name
+            content = file_path.read_text()
+            if content.strip():
+                shared_parts.append(f"## {rel}\n{content}")
     shared_memory_summary = "\n\n".join(shared_parts) if shared_parts else "(no shared memory yet)"
 
     # Step 4: Council
@@ -124,42 +135,48 @@ def run_cycle(
 
     log.info(f"Council decided: {council_result.decision}")
 
-    # Step 5: Each agent executes their assigned task in parallel (sequential calls)
+    # Step 5: Execute phases in order. Within each phase, assignments run sequentially
+    # (sequential calls, but conceptually independent — order within a phase doesn't matter).
+    # Phase N+1 only starts after phase N completes, so later phases can depend on earlier output.
     execution_summaries = []
     total_execution_cost = 0.0
-    for agent in config.agents:
-        task = council_result.assignments.get(agent.name, "")
-        if not task:
-            log.info(f"[{agent.name}] No task assigned — skipping execution")
-            continue
-        agent_tool_ctx = ToolContext(
-            repo=repo,
-            memory_root=memory_root,
-            agent_name=agent.name,
-            agent_role=agent.role,
-            notify_fn=notify_fn or (lambda msg: False),
-            costs_dir=costs_dir,
-            budget_limit=config.daily_limit_usd,
-        )
-        result = execute_action(
-            task=task,
-            agent_name=agent.name,
-            decision=council_result.decision,
-            llm=llm,
-            tool_ctx=agent_tool_ctx,
-            model=config.model_default,
-        )
-        execution_summaries.append(f"[{agent.name}] {result.summary}")
-        total_execution_cost += result.cost_usd
-        append_cost_entry(
-            costs_dir,
-            agent=agent.name,
-            model=config.model_default,
-            action="execution",
-            input_tokens=0,
-            output_tokens=0,
-            cost_usd=result.cost_usd,
-        )
+    for phase_idx, phase in enumerate(council_result.phases):
+        log.info(f"Executing phase {phase_idx + 1} ({len(phase)} assignment(s))")
+        for assignment in phase:
+            agent_cfg = next((a for a in config.agents if a.name == assignment.agent), None)
+            if not agent_cfg:
+                # Chair assigned a name that doesn't exist in config — skip gracefully
+                log.warning(f"Unknown agent in assignment: {assignment.agent} — skipping")
+                continue
+            agent_tool_ctx = ToolContext(
+                repo=repo,
+                memory_root=memory_root,
+                agent_name=agent_cfg.name,
+                agent_role=agent_cfg.role,
+                notify_fn=notify_fn or (lambda msg: False),
+                costs_dir=costs_dir,
+                budget_limit=config.daily_limit_usd,
+            )
+            result = execute_action(
+                task=assignment.task,
+                deliverable=assignment.deliverable,
+                agent_name=assignment.agent,
+                decision=council_result.decision,
+                llm=llm,
+                tool_ctx=agent_tool_ctx,
+                model=config.model_default,
+            )
+            execution_summaries.append(f"[{assignment.agent}] {result.summary}")
+            total_execution_cost += result.cost_usd
+            append_cost_entry(
+                costs_dir,
+                agent=assignment.agent,
+                model=config.model_default,
+                action="execution",
+                input_tokens=0,
+                output_tokens=0,
+                cost_usd=result.cost_usd,
+            )
 
     # Step 6: Persist council cost
     append_cost_entry(

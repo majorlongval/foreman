@@ -13,6 +13,16 @@ from brain.council import (
 from brain.config import Config, AgentConfig
 from brain.survey import SurveyResult
 
+# Reusable phases-format chair response for 4 agents
+_CHAIR_PHASES_4 = (
+    '{"decision": "build it", "action_plan": "step 1",'
+    '"phases": [[{"agent": "gandalf", "task": "scout the repo", "deliverable": "memory/gandalf/cycle_notes.md"},'
+    '{"agent": "gimli", "task": "open a PR", "deliverable": "PR opened"},'
+    '{"agent": "galadriel", "task": "review PR #1", "deliverable": "PR reviewed"},'
+    '{"agent": "samwise", "task": "update docs", "deliverable": "docs updated"}]],'
+    '"flag_for_jord": false, "flag_reason": ""}'
+)
+
 
 def make_agents() -> list[AgentConfig]:
     return [
@@ -375,19 +385,32 @@ class TestRunCouncil:
         chair_call = mock_llm.complete.call_args_list[4]
         assert chair_call.kwargs.get("response_format") == ChairResponse
 
-    def test_run_council_returns_per_agent_assignments(self, tmp_path: Path) -> None:
-        """Chair must assign a specific task to each agent in CouncilResult.assignments."""
+    def test_chair_response_parses_phases(self) -> None:
+        """ChairResponse must parse phases as List[List[AgentAssignment]]."""
+        from brain.council import parse_chair_response, AgentAssignment
+        text = (
+            '{"decision": "build it", "action_plan": "step 1",'
+            '"phases": [[{"agent": "gandalf", "task": "scout the repo", "deliverable": "memory/gandalf/cycle_notes.md"},'
+            '{"agent": "gimli", "task": "open a PR", "deliverable": "PR opened"}]],'
+            '"flag_for_jord": false, "flag_reason": ""}'
+        )
+        result = parse_chair_response(text)
+        assert len(result.phases) == 1
+        assert len(result.phases[0]) == 2
+        assert isinstance(result.phases[0][0], AgentAssignment)
+        assert result.phases[0][0].agent == "gandalf"
+        assert result.phases[0][0].task == "scout the repo"
+        assert result.phases[0][0].deliverable == "memory/gandalf/cycle_notes.md"
+        assert result.phases[0][1].agent == "gimli"
+
+    def test_run_council_returns_phases(self, tmp_path: Path) -> None:
+        """CouncilResult.phases must be populated from the chair's phases response."""
+        from brain.council import AgentAssignment
         agents = make_agents()
         journal_dir = tmp_path / "journal"
         journal_dir.mkdir()
         agent_response = '{"perspective": "I think X", "proposed_action": "do X"}'
-        chair_response = (
-            '{"decision": "build it", "action_plan": "step 1",'
-            '"assignments": {"gandalf": "scout the repo", "gimli": "open a PR",'
-            '"galadriel": "review PR #1", "samwise": "update docs"},'
-            '"flag_for_jord": false, "flag_reason": ""}'
-        )
-        mock_llm = self._make_mock_llm([agent_response] * 4 + [chair_response])
+        mock_llm = self._make_mock_llm([agent_response] * 4 + [_CHAIR_PHASES_4])
         config = Config(
             daily_limit_usd=5.0, model_default="test", model_reasoning="test",
             model_council="test", agents=agents, council_enabled=True,
@@ -399,9 +422,11 @@ class TestRunCouncil:
             memory_summaries={a.name: "" for a in agents},
             shared_memory_summary="", llm=mock_llm, journal_dir=journal_dir,
         )
-        assert len(result.assignments) == 4
-        assert result.assignments["gandalf"] == "scout the repo"
-        assert result.assignments["gimli"] == "open a PR"
+        assert len(result.phases) == 1
+        assert len(result.phases[0]) == 4
+        assert isinstance(result.phases[0][0], AgentAssignment)
+        assert result.phases[0][0].agent == "gandalf"
+        assert result.phases[0][0].deliverable == "memory/gandalf/cycle_notes.md"
 
     def test_chair_rotation_advances(self, tmp_path: Path) -> None:
         agents = make_agents()

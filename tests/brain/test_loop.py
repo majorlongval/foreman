@@ -300,7 +300,8 @@ class TestRunCycleMultiAgentExecution:
         chair_resp = MagicMock()
         chair_resp.text = (
             '{"decision": "build and scout", "action_plan": "parallel work",'
-            '"assignments": {"gandalf": "read brain/tools.py", "gimli": "create an issue"},'
+            '"phases": [[{"agent": "gandalf", "task": "read brain/tools.py", "deliverable": "memory/gandalf/cycle_notes.md"},'
+            '{"agent": "gimli", "task": "create an issue", "deliverable": "issue created"}]],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )
         chair_resp.input_tokens = 200
@@ -333,10 +334,10 @@ class TestRunCycleMultiAgentExecution:
         agent_resp.input_tokens = 100
         agent_resp.output_tokens = 50
         chair_resp = MagicMock()
-        # Only gimli gets an assignment
+        # Only gimli gets an assignment (phase with a single agent)
         chair_resp.text = (
             '{"decision": "build only", "action_plan": "gimli acts",'
-            '"assignments": {"gimli": "create issue #5"},'
+            '"phases": [[{"agent": "gimli", "task": "create issue #5", "deliverable": "issue #5 created"}]],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )
         chair_resp.input_tokens = 200
@@ -356,6 +357,176 @@ class TestRunCycleMultiAgentExecution:
         )
         assert outcome.status == "success"
         assert mock_llm.complete_with_tools.call_count == 1
+
+
+class TestRunCyclePhases:
+    """Tests for the phases-based execution model."""
+
+    def _make_agent_resp(self):
+        resp = MagicMock()
+        resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
+        resp.input_tokens = 100
+        resp.output_tokens = 50
+        return resp
+
+    def _make_executor_resp(self):
+        resp = MagicMock()
+        resp.tool_calls = []
+        resp.text = "Done."
+        resp.input_tokens = 100
+        resp.output_tokens = 40
+        return resp
+
+    def test_phase_2_runs_after_phase_1(self, cycle_env) -> None:
+        """Phase 1 agents run before phase 2 agents — execution order is preserved."""
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        mock_llm = MagicMock()
+        chair_resp = MagicMock()
+        # Two phases: phase 1 has gandalf, phase 2 has gimli
+        chair_resp.text = (
+            '{"decision": "sequential work", "action_plan": "phase by phase",'
+            '"phases": ['
+            '  [{"agent": "gandalf", "task": "scout first", "deliverable": "memory/gandalf/cycle_notes.md"}],'
+            '  [{"agent": "gimli", "task": "build after scout", "deliverable": "issue created"}]'
+            '],'
+            '"flag_for_jord": false, "flag_reason": ""}'
+        )
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        mock_llm.complete.side_effect = [self._make_agent_resp(), self._make_agent_resp(), chair_resp]
+
+        call_order = []
+
+        def executor_side_effect(**kwargs):
+            # Record which agent was called based on messages content
+            messages = kwargs.get("messages", [])
+            user_msg = next((m for m in messages if m["role"] == "user"), None)
+            if user_msg and "scout first" in user_msg["content"]:
+                call_order.append("gandalf")
+            elif user_msg and "build after scout" in user_msg["content"]:
+                call_order.append("gimli")
+            resp = self._make_executor_resp()
+            return resp
+
+        mock_llm.complete_with_tools.side_effect = executor_side_effect
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+        assert outcome.status == "success"
+        assert call_order == ["gandalf", "gimli"], f"Expected gandalf before gimli, got: {call_order}"
+
+    def test_single_agent_per_phase(self, cycle_env) -> None:
+        """A phase with only one agent runs that agent exactly once."""
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        mock_llm = MagicMock()
+        chair_resp = MagicMock()
+        chair_resp.text = (
+            '{"decision": "single agent", "action_plan": "gandalf only",'
+            '"phases": [[{"agent": "gandalf", "task": "solo mission", "deliverable": "memory/gandalf/cycle_notes.md"}]],'
+            '"flag_for_jord": false, "flag_reason": ""}'
+        )
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        mock_llm.complete.side_effect = [self._make_agent_resp(), self._make_agent_resp(), chair_resp]
+        mock_llm.complete_with_tools.return_value = self._make_executor_resp()
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+        assert outcome.status == "success"
+        assert mock_llm.complete_with_tools.call_count == 1
+
+    def test_unknown_agent_in_phase_skipped(self, cycle_env) -> None:
+        """If the chair assigns a task to an unknown agent name, the cycle still succeeds."""
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        mock_llm = MagicMock()
+        chair_resp = MagicMock()
+        # "aragorn" is not in the config (only gandalf, gimli)
+        chair_resp.text = (
+            '{"decision": "delegate", "action_plan": "let aragorn handle it",'
+            '"phases": [[{"agent": "aragorn", "task": "lead the charge", "deliverable": "battle won"},'
+            '{"agent": "gandalf", "task": "cast spells", "deliverable": "memory/gandalf/cycle_notes.md"}]],'
+            '"flag_for_jord": false, "flag_reason": ""}'
+        )
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        mock_llm.complete.side_effect = [self._make_agent_resp(), self._make_agent_resp(), chair_resp]
+        mock_llm.complete_with_tools.return_value = self._make_executor_resp()
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+        # Aragorn is skipped; gandalf still runs
+        assert outcome.status == "success"
+        assert mock_llm.complete_with_tools.call_count == 1
+
+
+class TestRunCycleSharedMemory:
+    """Tests for expanded shared memory reading."""
+
+    def _make_cycle_llm(self):
+        """Build a minimal mock LLM that returns valid responses for a full cycle."""
+        mock_llm = MagicMock()
+        agent_resp = MagicMock()
+        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
+        agent_resp.input_tokens = 100
+        agent_resp.output_tokens = 50
+        chair_resp = MagicMock()
+        chair_resp.text = '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}'
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 100
+        executor_resp.output_tokens = 40
+        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
+        return mock_llm
+
+    def test_shared_memory_includes_non_standard_subdir(self, cycle_env) -> None:
+        """Files written to memory/shared/<custom>/ must appear in shared_memory_summary passed to council."""
+        # Create a non-standard subdir under shared memory
+        custom_dir = cycle_env["memory_root"] / "shared" / "custom"
+        custom_dir.mkdir(parents=True, exist_ok=True)
+        (custom_dir / "note.md").write_text("Custom shared note content.")
+
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+
+        captured_shared_memory: list[str] = []
+
+        original_run_council = __import__("brain.council", fromlist=["run_council"]).run_council
+
+        def capture_run_council(**kwargs):
+            captured_shared_memory.append(kwargs.get("shared_memory_summary", ""))
+            return original_run_council(**kwargs)
+
+        from unittest.mock import patch
+        with patch("brain.loop.run_council", side_effect=capture_run_council):
+            outcome = run_cycle(
+                config=cycle_env["config"], repo=mock_repo, llm=self._make_cycle_llm(),
+                memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+                repo_root=cycle_env["repo_root"],
+            )
+
+        assert outcome.status == "success"
+        assert len(captured_shared_memory) == 1
+        assert "Custom shared note content." in captured_shared_memory[0]
 
 
 class TestRunCycleCostPersistence:
