@@ -103,11 +103,52 @@ class TestParseJsonResponse:
         result = _parse_json_response(text)
         assert result["perspective"] == "test"
 
+    def test_text_before_json(self) -> None:
+        from brain.council import _parse_json_response
+        text = 'Here is my analysis:\n{"perspective": "test", "proposed_action": "do X"}'
+        result = _parse_json_response(text)
+        assert result["perspective"] == "test"
+
+    def test_text_surrounding_json(self) -> None:
+        from brain.council import _parse_json_response
+        text = 'Let me think...\n{"decision": "build", "action_plan": "step 1"}\nDone!'
+        result = _parse_json_response(text)
+        assert result["decision"] == "build"
+
     def test_malformed_json_raises(self) -> None:
         from brain.council import _parse_json_response
         import json
         with pytest.raises(json.JSONDecodeError):
             _parse_json_response("not json at all")
+
+
+class TestPydanticValidation:
+    def test_parse_agent_response(self) -> None:
+        from brain.council import _parse_agent_response
+        text = '{"perspective": "We should explore", "proposed_action": "Research"}'
+        result = _parse_agent_response(text)
+        assert result.perspective == "We should explore"
+        assert result.proposed_action == "Research"
+
+    def test_parse_chair_response(self) -> None:
+        from brain.council import _parse_chair_response
+        text = '{"decision": "build it", "action_plan": "step 1"}'
+        result = _parse_chair_response(text)
+        assert result.decision == "build it"
+        assert result.flag_for_jord is False
+
+    def test_parse_chair_response_with_flag(self) -> None:
+        from brain.council import _parse_chair_response
+        text = '{"decision": "risky", "action_plan": "", "flag_for_jord": true, "flag_reason": "disagreement"}'
+        result = _parse_chair_response(text)
+        assert result.flag_for_jord is True
+        assert result.flag_reason == "disagreement"
+
+    def test_agent_response_missing_field_raises(self) -> None:
+        from brain.council import _parse_agent_response
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            _parse_agent_response('{"perspective": "test"}')
 
 
 class TestRunCouncil:

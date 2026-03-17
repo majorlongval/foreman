@@ -10,9 +10,9 @@ budget:
 # Replaces the existing ModelRouter ROUTING_PROFILES in llm_client.py.
 # The organism can add task-specific overrides as it evolves.
 models:
-  default: "gemini/gemini-2.5-flash"
-  reasoning: "gemini/gemini-2.5-pro"
-  council: "anthropic/claude-sonnet-4-6"
+  default: "gemini/gemini-3-flash-preview"
+  reasoning: "gemini/gemini-3-flash-preview"
+  council: "gemini/gemini-3-flash-preview"
 
 # -- Agent Roster (agents can propose additions/removals) --
 agents:
