@@ -123,3 +123,83 @@ class TestApprovePrTool:
         result = execute_tool("approve_pr", {"pr_number": 102, "comment": "looks good"}, ctx)
         ctx.repo.get_pull.assert_not_called()
         assert "only" in result.lower() or "critic" in result.lower()
+
+
+class TestReadPrTool:
+    def test_returns_title_and_body(self, tool_context: ToolContext) -> None:
+        mock_pr = MagicMock()
+        mock_pr.title = "Add executor"
+        mock_pr.body = "Wires up the tool loop."
+        mock_pr.number = 42
+        mock_pr.get_files.return_value = []
+        mock_pr.get_issue_comments.return_value = []
+        tool_context.repo.get_pull.return_value = mock_pr
+        result = execute_tool("read_pr", {"pr_number": 42}, tool_context)
+        assert "Add executor" in result
+        assert "Wires up the tool loop." in result
+
+    def test_returns_changed_files(self, tool_context: ToolContext) -> None:
+        mock_file = MagicMock()
+        mock_file.filename = "brain/executor.py"
+        mock_file.patch = "@@@ +1 def foo(): pass"
+        mock_pr = MagicMock()
+        mock_pr.title = "T"
+        mock_pr.body = "B"
+        mock_pr.number = 42
+        mock_pr.get_files.return_value = [mock_file]
+        mock_pr.get_issue_comments.return_value = []
+        tool_context.repo.get_pull.return_value = mock_pr
+        result = execute_tool("read_pr", {"pr_number": 42}, tool_context)
+        assert "brain/executor.py" in result
+
+    def test_truncates_long_diff(self, tool_context: ToolContext) -> None:
+        mock_file = MagicMock()
+        mock_file.filename = "big.py"
+        mock_file.patch = "x" * 20000
+        mock_pr = MagicMock()
+        mock_pr.title = "T"
+        mock_pr.body = "B"
+        mock_pr.number = 42
+        mock_pr.get_files.return_value = [mock_file]
+        mock_pr.get_issue_comments.return_value = []
+        tool_context.repo.get_pull.return_value = mock_pr
+        result = execute_tool("read_pr", {"pr_number": 42}, tool_context)
+        assert "truncated" in result
+        assert len(result) < 20000
+
+    def test_returns_existing_comments(self, tool_context: ToolContext) -> None:
+        mock_comment = MagicMock()
+        mock_comment.user.login = "galadriel-bot"
+        mock_comment.body = "Missing tests."
+        mock_pr = MagicMock()
+        mock_pr.title = "T"
+        mock_pr.body = "B"
+        mock_pr.number = 42
+        mock_pr.get_files.return_value = []
+        mock_pr.get_issue_comments.return_value = [mock_comment]
+        tool_context.repo.get_pull.return_value = mock_pr
+        result = execute_tool("read_pr", {"pr_number": 42}, tool_context)
+        assert "Missing tests." in result
+
+    def test_handles_nonexistent_pr(self, tool_context: ToolContext) -> None:
+        tool_context.repo.get_pull.side_effect = Exception("Not found")
+        result = execute_tool("read_pr", {"pr_number": 999}, tool_context)
+        assert "error" in result.lower()
+
+
+class TestPostCommentTool:
+    def test_posts_comment_on_pr(self, tool_context: ToolContext) -> None:
+        mock_pr = MagicMock()
+        tool_context.repo.get_pull.return_value = mock_pr
+        result = execute_tool(
+            "post_comment", {"pr_number": 42, "body": "LGTM, but add tests."}, tool_context
+        )
+        mock_pr.create_issue_comment.assert_called_once_with("LGTM, but add tests.")
+        assert "comment" in result.lower()
+
+    def test_handles_api_error(self, tool_context: ToolContext) -> None:
+        tool_context.repo.get_pull.side_effect = Exception("API error")
+        result = execute_tool(
+            "post_comment", {"pr_number": 42, "body": "looks good"}, tool_context
+        )
+        assert "error" in result.lower()

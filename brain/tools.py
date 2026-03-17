@@ -148,6 +148,29 @@ TOOL_SCHEMAS = [
         },
     },
     {
+        "name": "read_pr",
+        "description": "Read a pull request: title, body, changed files, diff, and existing comments.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pr_number": {"type": "integer", "description": "PR number to read."},
+            },
+            "required": ["pr_number"],
+        },
+    },
+    {
+        "name": "post_comment",
+        "description": "Post a comment on a pull request.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pr_number": {"type": "integer", "description": "PR number to comment on."},
+                "body": {"type": "string", "description": "Comment text (Markdown)."},
+            },
+            "required": ["pr_number", "body"],
+        },
+    },
+    {
         "name": "approve_pr",
         "description": "Approve a pull request. Only available to the critic role.",
         "input_schema": {
@@ -293,6 +316,55 @@ def _list_prs(tool_input: dict, ctx: ToolContext) -> str:
         return f"Error listing PRs: {e}"
 
 
+_MAX_DIFF_CHARS = 8000
+
+
+def _read_pr(tool_input: dict, ctx: ToolContext) -> str:
+    # Returns title, body, changed files+diffs, and existing comments so
+    # the critic can do a meaningful review without needing shell access.
+    try:
+        pr = ctx.repo.get_pull(tool_input["pr_number"])
+        parts = [
+            f"# PR #{pr.number}: {pr.title}",
+            "",
+            pr.body or "(no description)",
+            "",
+            "## Changed Files",
+        ]
+        diff_chars = 0
+        truncated = False
+        for f in pr.get_files():
+            parts.append(f"### {f.filename}")
+            patch = f.patch or ""
+            if diff_chars + len(patch) > _MAX_DIFF_CHARS:
+                remaining = max(0, _MAX_DIFF_CHARS - diff_chars)
+                parts.append(patch[:remaining])
+                parts.append("... (truncated)")
+                truncated = True
+                break
+            parts.append(patch)
+            diff_chars += len(patch)
+        if truncated:
+            parts.append("\n(diff truncated — too large to show in full)")
+        comments = list(pr.get_issue_comments())
+        if comments:
+            parts.append("\n## Comments")
+            for c in comments:
+                parts.append(f"**{c.user.login}:** {c.body}")
+        return "\n".join(parts)
+    except Exception as e:
+        return f"Error reading PR #{tool_input['pr_number']}: {e}"
+
+
+def _post_comment(tool_input: dict, ctx: ToolContext) -> str:
+    try:
+        pr = ctx.repo.get_pull(tool_input["pr_number"])
+        pr.create_issue_comment(tool_input["body"])
+        return f"Posted comment on PR #{tool_input['pr_number']}."
+    except Exception as e:
+        return f"Error posting comment on PR #{tool_input['pr_number']}: {e}"
+
+
 def _approve_pr(tool_input: dict, ctx: ToolContext) -> str:
     if ctx.agent_role != "critic":
         return "Only the critic role can approve PRs."
@@ -314,5 +386,7 @@ _HANDLERS = {
     "check_budget": _check_budget,
     "list_issues": _list_issues,
     "list_prs": _list_prs,
+    "read_pr": _read_pr,
+    "post_comment": _post_comment,
     "approve_pr": _approve_pr,
 }

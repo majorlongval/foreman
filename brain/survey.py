@@ -8,9 +8,9 @@ context for LLM calls.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from brain.config import Config
 from brain.cost_tracking import load_today_spend
@@ -30,6 +30,8 @@ class SurveyResult:
     shared_decisions: List[str]
     journal_last_entry: Optional[str]
     inbox_note: Optional[str] = None
+    # Maps "PR #N: title" → list of "author: comment body" strings
+    pr_comments: Dict[str, List[str]] = field(default_factory=dict)
 
     @property
     def budget_remaining(self) -> float:
@@ -72,6 +74,13 @@ class SurveyResult:
             lines.append("## Last Cycle")
             lines.append(self.journal_last_entry)
             lines.append("")
+        if self.pr_comments:
+            lines.append("## PR Comments")
+            for pr_key, comments in self.pr_comments.items():
+                lines.append(f"### {pr_key}")
+                for comment in comments:
+                    lines.append(f"  - {comment}")
+            lines.append("")
         if self.inbox_note:
             lines.append("## Notes from Jord")
             lines.append(self.inbox_note)
@@ -99,9 +108,20 @@ def gather_survey(
         log.error(f"Failed to fetch issues: {e}")
 
     open_prs: List[str] = []
+    pr_comments: Dict[str, List[str]] = {}
     try:
         for pr in repo.get_pulls(state="open"):
-            open_prs.append(f"PR #{pr.number}: {pr.title}")
+            key = f"PR #{pr.number}: {pr.title}"
+            open_prs.append(key)
+            try:
+                comments = [
+                    f"{c.user.login}: {c.body}"
+                    for c in pr.get_issue_comments()
+                ]
+                if comments:
+                    pr_comments[key] = comments
+            except Exception as e:
+                log.warning(f"Failed to fetch comments for PR #{pr.number}: {e}")
     except Exception as e:
         log.error(f"Failed to fetch PRs: {e}")
 
@@ -131,6 +151,7 @@ def gather_survey(
         shared_decisions=shared_decisions,
         journal_last_entry=journal_last,
         inbox_note=inbox_note,
+        pr_comments=pr_comments,
     )
 
 

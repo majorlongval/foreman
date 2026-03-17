@@ -152,6 +152,65 @@ class TestInbox(unittest.TestCase):
             self.assertIsNone(result.inbox_note)
 
 
+class TestPrCommentsSurvey(unittest.TestCase):
+    def _make_memory(self, tmp_path: Path) -> Path:
+        memory_root = tmp_path / "memory"
+        for d in ["costs", "decisions", "journal", "incidents"]:
+            (memory_root / "shared" / d).mkdir(parents=True)
+        return memory_root
+
+    def test_pr_comments_included_in_context_string(self) -> None:
+        """When a PR has comments, to_context_string shows them under the PR."""
+        result = SurveyResult(
+            budget_limit=5.0, budget_spent=0.0,
+            open_issues=[], open_prs=[],
+            recent_incidents=[], shared_decisions=[],
+            journal_last_entry=None,
+            pr_comments={"PR #42: Add executor": ["galadriel: Missing tests."]},
+        )
+        ctx = result.to_context_string()
+        assert "Missing tests." in ctx
+
+    def test_pr_comments_absent_when_empty(self) -> None:
+        """When no PR comments, to_context_string has no comments section."""
+        result = SurveyResult(
+            budget_limit=5.0, budget_spent=0.0,
+            open_issues=[], open_prs=[],
+            recent_incidents=[], shared_decisions=[],
+            journal_last_entry=None,
+        )
+        ctx = result.to_context_string()
+        assert "PR Comments" not in ctx
+
+    def test_gather_survey_fetches_pr_comments(self) -> None:
+        """gather_survey fetches comments from open PRs."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            memory_root = self._make_memory(tmp_path)
+            mock_comment = MagicMock()
+            mock_comment.user.login = "galadriel-bot"
+            mock_comment.body = "Needs more tests."
+            mock_pr = MagicMock()
+            mock_pr.number = 42
+            mock_pr.title = "Add executor"
+            mock_pr.get_issue_comments.return_value = [mock_comment]
+            mock_repo = MagicMock()
+            mock_repo.get_issues.return_value = []
+            mock_repo.get_pulls.return_value = [mock_pr]
+            result = gather_survey(make_config(), memory_root, mock_repo)
+            assert any("Needs more tests." in c for comments in result.pr_comments.values() for c in comments)
+
+    def test_gather_survey_pr_comments_empty_when_no_prs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            memory_root = self._make_memory(tmp_path)
+            mock_repo = MagicMock()
+            mock_repo.get_issues.return_value = []
+            mock_repo.get_pulls.return_value = []
+            result = gather_survey(make_config(), memory_root, mock_repo)
+            assert result.pr_comments == {}
+
+
 class TestGatherSurvey(unittest.TestCase):
     def test_gathers_budget_from_cost_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
