@@ -286,6 +286,78 @@ class TestRunCycleOutbox:
         notify_fn.assert_not_called()
 
 
+class TestRunCycleMultiAgentExecution:
+    def test_each_agent_with_assignment_gets_executor_call(self, cycle_env) -> None:
+        """When the chair assigns tasks to both agents, complete_with_tools is called once per agent."""
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        mock_llm = MagicMock()
+        agent_resp = MagicMock()
+        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
+        agent_resp.input_tokens = 100
+        agent_resp.output_tokens = 50
+        chair_resp = MagicMock()
+        chair_resp.text = (
+            '{"decision": "build and scout", "action_plan": "parallel work",'
+            '"assignments": {"gandalf": "read brain/tools.py", "gimli": "create an issue"},'
+            '"flag_for_jord": false, "flag_reason": ""}'
+        )
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 100
+        executor_resp.output_tokens = 40
+        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+        assert outcome.status == "success"
+        # Both gandalf and gimli have assignments — executor called twice
+        assert mock_llm.complete_with_tools.call_count == 2
+
+    def test_agent_without_assignment_skips_execution(self, cycle_env) -> None:
+        """When the chair only assigns one agent a task, only one executor call is made."""
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        mock_llm = MagicMock()
+        agent_resp = MagicMock()
+        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
+        agent_resp.input_tokens = 100
+        agent_resp.output_tokens = 50
+        chair_resp = MagicMock()
+        # Only gimli gets an assignment
+        chair_resp.text = (
+            '{"decision": "build only", "action_plan": "gimli acts",'
+            '"assignments": {"gimli": "create issue #5"},'
+            '"flag_for_jord": false, "flag_reason": ""}'
+        )
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 100
+        executor_resp.output_tokens = 40
+        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+        assert outcome.status == "success"
+        assert mock_llm.complete_with_tools.call_count == 1
+
+
 class TestRunCycleCostPersistence:
     def test_successful_cycle_writes_cost_entry(self, cycle_env) -> None:
         """After a successful cycle, at least one cost entry must exist in today's JSONL."""

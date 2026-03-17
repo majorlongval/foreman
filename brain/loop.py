@@ -122,23 +122,46 @@ def run_cycle(
         _write_incident(memory_root, f"Council failed: {e}", notify_fn)
         return CycleOutcome("error", "", "", 0.0, str(e))
 
-    # Step 5: Act — execute the action plan via tool-use LLM call
-    chair_config = next(a for a in config.agents if a.name == council_result.chair_name)
-    tool_ctx = ToolContext(
-        repo=repo,
-        memory_root=memory_root,
-        agent_name=council_result.chair_name,
-        agent_role=chair_config.role,
-        notify_fn=notify_fn or (lambda msg: False),
-        costs_dir=costs_dir,
-        budget_limit=config.daily_limit_usd,
-    )
-    execution = execute_action(
-        council_result, llm, tool_ctx, config.model_default,
-    )
     log.info(f"Council decided: {council_result.decision}")
 
-    # Step 6: Persist costs — council calls + executor calls as two entries
+    # Step 5: Each agent executes their assigned task in parallel (sequential calls)
+    execution_summaries = []
+    total_execution_cost = 0.0
+    for agent in config.agents:
+        task = council_result.assignments.get(agent.name, "")
+        if not task:
+            log.info(f"[{agent.name}] No task assigned — skipping execution")
+            continue
+        agent_tool_ctx = ToolContext(
+            repo=repo,
+            memory_root=memory_root,
+            agent_name=agent.name,
+            agent_role=agent.role,
+            notify_fn=notify_fn or (lambda msg: False),
+            costs_dir=costs_dir,
+            budget_limit=config.daily_limit_usd,
+        )
+        result = execute_action(
+            task=task,
+            agent_name=agent.name,
+            decision=council_result.decision,
+            llm=llm,
+            tool_ctx=agent_tool_ctx,
+            model=config.model_default,
+        )
+        execution_summaries.append(f"[{agent.name}] {result.summary}")
+        total_execution_cost += result.cost_usd
+        append_cost_entry(
+            costs_dir,
+            agent=agent.name,
+            model=config.model_default,
+            action="execution",
+            input_tokens=0,
+            output_tokens=0,
+            cost_usd=result.cost_usd,
+        )
+
+    # Step 6: Persist council cost
     append_cost_entry(
         costs_dir,
         agent=council_result.chair_name,
@@ -148,17 +171,8 @@ def run_cycle(
         output_tokens=0,
         cost_usd=council_result.cost_usd,
     )
-    append_cost_entry(
-        costs_dir,
-        agent=council_result.chair_name,
-        model=config.model_default,
-        action="execution",
-        input_tokens=0,
-        output_tokens=0,
-        cost_usd=execution.cost_usd,
-    )
 
-    total_cost = council_result.cost_usd + execution.cost_usd
+    total_cost = council_result.cost_usd + total_execution_cost
 
     # Step 7: Reflect
     journal_entry = (
@@ -190,7 +204,7 @@ def run_cycle(
     return CycleOutcome(
         status="success",
         decision=council_result.decision,
-        action_result=execution.summary,
+        action_result="\n".join(execution_summaries) if execution_summaries else "No agents had tasks.",
         cost=total_cost,
         error=None,
     )

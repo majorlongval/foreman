@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, call
 from pathlib import Path
 from brain.executor import execute_action, to_openai_tools, ExecutionResult
 from brain.tools import TOOL_SCHEMAS, ToolContext
-from brain.council import CouncilResult, AgentPerspective
 
 
 @pytest.fixture
@@ -21,15 +20,6 @@ def tool_ctx(tmp_path: Path) -> ToolContext:
         agent_name="gandalf",
         notify_fn=MagicMock(return_value=True),
         costs_dir=memory_root / "shared" / "costs",
-    )
-
-
-def make_council_result(decision: str = "Do X", action_plan: str = "Step 1") -> CouncilResult:
-    return CouncilResult(
-        perspectives=[AgentPerspective("gandalf", "Explore", "Research")],
-        chair_name="gandalf",
-        decision=decision,
-        action_plan=action_plan,
     )
 
 
@@ -50,10 +40,12 @@ class TestToOpenAITools:
 
 
 class TestExecuteActionNoTools:
-    def test_empty_action_plan_skips(self, tool_ctx: ToolContext) -> None:
-        council = make_council_result(action_plan="")
+    def test_empty_task_skips(self, tool_ctx: ToolContext) -> None:
         mock_llm = MagicMock()
-        result = execute_action(council, mock_llm, tool_ctx, "test/model")
+        result = execute_action(
+            task="", agent_name="gandalf", decision="explore",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
         assert "skipping" in result.summary.lower()
         mock_llm.complete_with_tools.assert_not_called()
 
@@ -61,7 +53,6 @@ class TestExecuteActionNoTools:
 class TestExecuteActionTextResponse:
     def test_llm_returns_text_only(self, tool_ctx: ToolContext) -> None:
         """LLM decides no tool calls needed — just returns text."""
-        council = make_council_result()
         mock_llm = MagicMock()
         response = MagicMock()
         response.tool_calls = []
@@ -70,7 +61,10 @@ class TestExecuteActionTextResponse:
         response.output_tokens = 80
         mock_llm.complete_with_tools.return_value = response
 
-        result = execute_action(council, mock_llm, tool_ctx, "gemini/gemini-3-flash-preview")
+        result = execute_action(
+            task="Review current state", agent_name="gandalf", decision="assess",
+            llm=mock_llm, tool_ctx=tool_ctx, model="gemini/gemini-3-flash-preview",
+        )
         assert isinstance(result, ExecutionResult)
         assert "no action" in result.summary.lower()
         assert result.cost_usd > 0.0
@@ -79,10 +73,8 @@ class TestExecuteActionTextResponse:
 class TestExecuteActionWithToolCalls:
     def test_single_tool_call(self, tool_ctx: ToolContext) -> None:
         """LLM calls check_budget, gets result, then responds with text."""
-        council = make_council_result(action_plan="Check the budget")
         mock_llm = MagicMock()
 
-        # First call: LLM returns a tool call
         tool_call = MagicMock()
         tool_call.id = "call_1"
         tool_call.function.name = "check_budget"
@@ -91,24 +83,29 @@ class TestExecuteActionWithToolCalls:
         first_response = MagicMock()
         first_response.tool_calls = [tool_call]
         first_response.text = ""
+        first_response.input_tokens = 100
+        first_response.output_tokens = 50
         first_response.raw_message = {"role": "assistant", "tool_calls": [
             {"id": "call_1", "type": "function", "function": {"name": "check_budget", "arguments": "{}"}}
         ]}
 
-        # Second call: LLM returns text (no more tools)
         second_response = MagicMock()
         second_response.tool_calls = []
         second_response.text = "Budget is $5.00 remaining. All good."
+        second_response.input_tokens = 100
+        second_response.output_tokens = 30
 
         mock_llm.complete_with_tools.side_effect = [first_response, second_response]
 
-        result = execute_action(council, mock_llm, tool_ctx, "test/model")
+        result = execute_action(
+            task="Check the budget", agent_name="gandalf", decision="monitor",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
         assert "$" in result.summary
         assert mock_llm.complete_with_tools.call_count == 2
 
     def test_write_memory_tool_call(self, tool_ctx: ToolContext) -> None:
         """LLM writes to shared memory via tool call."""
-        council = make_council_result(action_plan="Write a decision")
         mock_llm = MagicMock()
 
         tool_call = MagicMock()
@@ -139,12 +136,14 @@ class TestExecuteActionWithToolCalls:
 
         mock_llm.complete_with_tools.side_effect = [first_response, second_response]
 
-        result = execute_action(council, mock_llm, tool_ctx, "test/model")
+        result = execute_action(
+            task="Write a decision", agent_name="gandalf", decision="document",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
         assert (tool_ctx.memory_root / "shared" / "decisions" / "test.md").read_text() == "We decided to explore."
 
     def test_max_rounds_prevents_infinite_loop(self, tool_ctx: ToolContext) -> None:
         """Safety: stops after max_rounds even if LLM keeps calling tools."""
-        council = make_council_result()
         mock_llm = MagicMock()
 
         tool_call = MagicMock()
@@ -163,17 +162,22 @@ class TestExecuteActionWithToolCalls:
 
         mock_llm.complete_with_tools.return_value = response
 
-        result = execute_action(council, mock_llm, tool_ctx, "test/model", max_rounds=3)
+        result = execute_action(
+            task="Check budget forever", agent_name="gandalf", decision="monitor",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model", max_rounds=3,
+        )
         assert mock_llm.complete_with_tools.call_count == 3
         assert "max rounds" in result.summary.lower()
 
 
 class TestExecuteActionLLMFailure:
     def test_llm_error_returns_error_message(self, tool_ctx: ToolContext) -> None:
-        council = make_council_result()
         mock_llm = MagicMock()
         mock_llm.complete_with_tools.side_effect = Exception("API down")
 
-        result = execute_action(council, mock_llm, tool_ctx, "test/model")
+        result = execute_action(
+            task="Do something", agent_name="gandalf", decision="act",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
         assert "error" in result.summary.lower()
         assert "API down" in result.summary

@@ -322,6 +322,34 @@ class TestRunCouncil:
         chair_call = mock_llm.complete.call_args_list[4]
         assert chair_call.kwargs.get("response_format") == ChairResponse
 
+    def test_run_council_returns_per_agent_assignments(self, tmp_path: Path) -> None:
+        """Chair must assign a specific task to each agent in CouncilResult.assignments."""
+        agents = make_agents()
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        agent_response = '{"perspective": "I think X", "proposed_action": "do X"}'
+        chair_response = (
+            '{"decision": "build it", "action_plan": "step 1",'
+            '"assignments": {"gandalf": "scout the repo", "gimli": "open a PR",'
+            '"galadriel": "review PR #1", "samwise": "update docs"},'
+            '"flag_for_jord": false, "flag_reason": ""}'
+        )
+        mock_llm = self._make_mock_llm([agent_response] * 4 + [chair_response])
+        config = Config(
+            daily_limit_usd=5.0, model_default="test", model_reasoning="test",
+            model_council="test", agents=agents, council_enabled=True,
+            max_cycles_per_day=12, telegram_enabled=True,
+        )
+        result = run_council(
+            config=config, agents=agents, survey=make_survey(),
+            philosophy="Be good.", identity_texts={a.name: f"You are {a.name}" for a in agents},
+            memory_summaries={a.name: "" for a in agents},
+            shared_memory_summary="", llm=mock_llm, journal_dir=journal_dir,
+        )
+        assert len(result.assignments) == 4
+        assert result.assignments["gandalf"] == "scout the repo"
+        assert result.assignments["gimli"] == "open a PR"
+
     def test_chair_rotation_advances(self, tmp_path: Path) -> None:
         agents = make_agents()
         journal_dir = tmp_path / "journal"

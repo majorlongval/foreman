@@ -1,7 +1,7 @@
-"""Execute council action plans using LLM tool-use calls.
+"""Execute an agent's assigned task using LLM tool-use calls.
 
 Flow:
-1. Build prompt from council decision + action plan
+1. Build prompt from council decision + this agent's specific task
 2. Call LLM with tool schemas
 3. If LLM returns tool calls, execute each via execute_tool()
 4. Feed results back to LLM
@@ -12,22 +12,21 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List
 
-from brain.council import CouncilResult
 from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 from brain.llm_client import estimate_cost
 
 log = logging.getLogger("foreman.brain.executor")
 
-# Max tool-use rounds per action to prevent runaway loops
+# Max tool-use rounds per agent to prevent runaway loops
 DEFAULT_MAX_ROUNDS = 5
 
 
 @dataclass
 class ExecutionResult:
-    """Result of executing a council action plan."""
+    """Result of one agent executing their assigned task."""
     summary: str
     cost_usd: float = 0.0
 
@@ -48,39 +47,43 @@ def to_openai_tools(schemas: list[dict]) -> list[dict]:
 
 
 def execute_action(
-    council_result: CouncilResult,
+    task: str,
+    agent_name: str,
+    decision: str,
     llm: object,
     tool_ctx: ToolContext,
     model: str,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
 ) -> ExecutionResult:
-    """Execute the council's action plan via LLM tool-use loop.
+    """Execute one agent's assigned task via LLM tool-use loop.
 
     Args:
-        council_result: The council's decision and action plan
+        task: The specific task assigned to this agent by the chair
+        agent_name: Name of the agent executing (used in logs and prompt)
+        decision: Overall council decision — gives context for why this task matters
         llm: LLM client with complete_with_tools() method
-        tool_ctx: Context for tool execution (repo, memory, etc.)
-        model: Model string for the execution LLM call
-        max_rounds: Safety limit on tool-use rounds
+        tool_ctx: Context for tool execution (repo, memory, budget, etc.)
+        model: Model string for the LLM call
+        max_rounds: Safety limit on tool-use rounds per agent
 
     Returns:
         ExecutionResult with summary of what was done and total cost in USD
     """
-    if not council_result.action_plan:
-        return ExecutionResult(summary="No action plan — skipping execution.")
+    if not task:
+        return ExecutionResult(summary="No task assigned — skipping execution.")
 
     tools = to_openai_tools(TOOL_SCHEMAS)
     system = (
-        "You are the executor for an autonomous agent society. "
-        "The council has deliberated and decided on an action. "
-        "Use the available tools to carry out the action plan. "
+        f"You are {agent_name}, an autonomous agent. "
+        "The council has deliberated and assigned you a specific task. "
+        "Use the available tools to carry it out. "
         "Be precise and efficient — every tool call costs tokens.\n\n"
         "When you're done, respond with a brief summary of what you accomplished."
     )
     user = (
-        f"## Council Decision\n{council_result.decision}\n\n"
-        f"## Action Plan\n{council_result.action_plan}\n\n"
-        "Execute this plan using the available tools."
+        f"## Council Decision\n{decision}\n\n"
+        f"## Your Task\n{task}\n\n"
+        "Execute your task using the available tools."
     )
 
     messages = [
@@ -102,12 +105,10 @@ def execute_action(
             total_cost += estimate_cost(model, response.input_tokens, response.output_tokens)
 
             if not response.tool_calls:
-                # LLM is done — return its final text
                 summary = response.text or _summarize_actions(actions_taken)
                 return ExecutionResult(summary=summary, cost_usd=total_cost)
 
-            # Process each tool call
-            # Append assistant message with tool calls to conversation
+            # Append assistant message with tool calls, then feed each result back
             messages.append(response.raw_message)
 
             for tool_call in response.tool_calls:
@@ -121,20 +122,18 @@ def execute_action(
                 result = execute_tool(name, args, tool_ctx)
                 actions_taken.append(f"{name}: {result[:100]}")
 
-                # Feed result back as tool response
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "content": result,
                 })
 
-        # Hit max rounds
-        log.warning(f"Executor hit max rounds ({max_rounds})")
+        log.warning(f"Executor hit max rounds ({max_rounds}) for {agent_name}")
         summary = f"Reached max rounds ({max_rounds}). " + _summarize_actions(actions_taken)
         return ExecutionResult(summary=summary, cost_usd=total_cost)
 
     except Exception as e:
-        log.error(f"Executor error: {e}")
+        log.error(f"Executor error for {agent_name}: {e}")
         done = _summarize_actions(actions_taken)
         summary = f"Execution error: {e}" + (f"\nCompleted before error: {done}" if done else "")
         return ExecutionResult(summary=summary, cost_usd=total_cost)

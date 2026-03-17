@@ -11,9 +11,9 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Protocol
+from typing import Dict, List, Optional, Protocol
 
 from pydantic import BaseModel
 
@@ -64,15 +64,19 @@ CHAIR_SYSTEM = """{philosophy}
 
 You are {chair_name}, the {chair_role}. \
 You are the chair for this council cycle. \
-Review all perspectives and decide on ONE action for this cycle. \
-Be specific about what to do and why.
+Review all perspectives and synthesize them into a decision. \
+Then assign a specific, concrete task to EACH agent by name. \
+Every agent should have work to do — parallel action is faster than sequential.
 
 If there is a disagreement about something risky (deleting code, \
 changing architecture), flag it for Jord instead of acting.
 
+The agents in this council are: {agent_names}
+
 You MUST respond with ONLY a JSON object, no other text:
 {{"decision": "what we will do and why", \
-"action_plan": "specific steps to execute", \
+"action_plan": "overall summary of the plan", \
+"assignments": {{{assignment_example}}}, \
 "flag_for_jord": false, \
 "flag_reason": ""}}"""
 
@@ -97,6 +101,7 @@ class ChairResponse(BaseModel):
     """Expected JSON from the chair's decision call."""
     decision: str
     action_plan: str
+    assignments: Dict[str, str] = {}  # agent_name → specific task for this cycle
     flag_for_jord: bool = False
     flag_reason: str = ""
 
@@ -136,6 +141,7 @@ class CouncilResult:
     decision: str
     action_plan: str
     cost_usd: float = 0.0
+    assignments: Dict[str, str] = field(default_factory=dict)  # agent_name → task
 
 
 # ── Main entry point ──────────────────────────────────────────
@@ -198,7 +204,7 @@ def run_council(
 
     chair_identity = identity_texts.get(chair.name, f"You are {chair.name}.")
     system, user = _build_chair_prompt(
-        chair, philosophy, chair_identity, perspectives, survey_context,
+        chair, philosophy, chair_identity, perspectives, survey_context, agents,
     )
     try:
         response = llm.complete(
@@ -214,13 +220,17 @@ def run_council(
         parsed = parse_chair_response(response.text)
         decision = parsed.decision
         action_plan = parsed.action_plan
+        assignments = parsed.assignments
         log.info(f"[{chair.name} / chair] Decision: {decision}")
+        for agent_name, task in assignments.items():
+            log.info(f"  → {agent_name}: {task}")
         if parsed.flag_for_jord:
             log.warning(f"[{chair.name} / chair] Flagged for Jord: {parsed.flag_reason}")
     except Exception as e:
         log.error(f"Chair {chair.name} decision failed: {e}")
         decision = f"Chair decision failed: {e}"
         action_plan = ""
+        assignments = {}
 
     # Rotate chair for next cycle
     next_index = (chair_index + 1) % len(agents)
@@ -232,6 +242,7 @@ def run_council(
         decision=decision,
         action_plan=action_plan,
         cost_usd=total_cost,
+        assignments=assignments,
     )
 
 
@@ -285,6 +296,7 @@ def _build_chair_prompt(
     identity: str,
     perspectives: List[AgentPerspective],
     survey_context: str,
+    all_agents: List[AgentConfig],
 ) -> tuple[str, str]:
     """Build system and user prompts for the chair's decision."""
     perspectives_text = "\n\n".join(
@@ -292,11 +304,18 @@ def _build_chair_prompt(
         f"Proposed action: {p.proposed_action}"
         for p in perspectives
     )
+    agent_names = ", ".join(a.name for a in all_agents)
+    # Build example assignments so the LLM knows the exact format expected
+    assignment_example = ", ".join(
+        f'"{a.name}": "task for {a.name}"' for a in all_agents
+    )
     system = CHAIR_SYSTEM.format(
         philosophy=philosophy,
         identity=identity,
         chair_name=chair.name,
         chair_role=chair.role,
+        agent_names=agent_names,
+        assignment_example=assignment_example,
     )
     user = CHAIR_USER.format(
         survey_context=survey_context,
