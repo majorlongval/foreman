@@ -4,7 +4,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, call
 from pathlib import Path
-from brain.executor import execute_action, _to_openai_tools
+from brain.executor import execute_action, to_openai_tools
 from brain.tools import TOOL_SCHEMAS, ToolContext
 from brain.council import CouncilResult, AgentPerspective
 
@@ -35,7 +35,7 @@ def make_council_result(decision: str = "Do X", action_plan: str = "Step 1") -> 
 
 class TestToOpenAITools:
     def test_converts_schema_format(self) -> None:
-        result = _to_openai_tools(TOOL_SCHEMAS)
+        result = to_openai_tools(TOOL_SCHEMAS)
         assert len(result) == len(TOOL_SCHEMAS)
         for tool in result:
             assert tool["type"] == "function"
@@ -44,7 +44,7 @@ class TestToOpenAITools:
             assert "parameters" in tool["function"]
 
     def test_read_file_tool_converted(self) -> None:
-        result = _to_openai_tools(TOOL_SCHEMAS)
+        result = to_openai_tools(TOOL_SCHEMAS)
         read_file = next(t for t in result if t["function"]["name"] == "read_file")
         assert read_file["function"]["parameters"]["required"] == ["path"]
 

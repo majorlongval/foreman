@@ -23,7 +23,7 @@ log = logging.getLogger("foreman.brain.executor")
 DEFAULT_MAX_ROUNDS = 5
 
 
-def _to_openai_tools(schemas: list[dict]) -> list[dict]:
+def to_openai_tools(schemas: list[dict]) -> list[dict]:
     """Convert our tool schemas to OpenAI/LiteLLM tool format."""
     return [
         {
@@ -60,7 +60,7 @@ def execute_action(
     if not council_result.action_plan:
         return "No action plan — skipping execution."
 
-    tools = _to_openai_tools(TOOL_SCHEMAS)
+    tools = to_openai_tools(TOOL_SCHEMAS)
     system = (
         "You are the executor for an autonomous agent society. "
         "The council has deliberated and decided on an action. "

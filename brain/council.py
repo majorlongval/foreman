@@ -168,7 +168,7 @@ def run_council(
                 message=user,
                 max_tokens=1024,
             )
-            parsed = _parse_agent_response(response.text)
+            parsed = parse_agent_response(response.text)
             perspectives.append(AgentPerspective(
                 agent_name=agent.name,
                 perspective=parsed.perspective,
@@ -198,7 +198,7 @@ def run_council(
             message=user,
             max_tokens=2048,
         )
-        parsed = _parse_chair_response(response.text)
+        parsed = parse_chair_response(response.text)
         decision = parsed.decision
         action_plan = parsed.action_plan
     except Exception as e:
@@ -290,7 +290,7 @@ def _build_chair_prompt(
 
 # ── Response parsing ──────────────────────────────────────────
 
-def _extract_json(text: str) -> str:
+def extract_json(text: str) -> str:
     """Extract a JSON object string from LLM output.
 
     Handles: plain JSON, markdown fences, and text surrounding JSON.
@@ -311,16 +311,16 @@ def _extract_json(text: str) -> str:
     return stripped
 
 
-def _parse_json_response(text: str) -> dict:
+def parse_json_response(text: str) -> dict:
     """Extract and parse JSON from an LLM response."""
-    return json.loads(_extract_json(text))
+    return json.loads(extract_json(text))
 
 
-def _parse_agent_response(text: str) -> AgentResponse:
+def parse_agent_response(text: str) -> AgentResponse:
     """Parse an agent's deliberation response with pydantic validation."""
-    return AgentResponse.model_validate(_parse_json_response(text))
+    return AgentResponse.model_validate(parse_json_response(text))
 
 
-def _parse_chair_response(text: str) -> ChairResponse:
+def parse_chair_response(text: str) -> ChairResponse:
     """Parse the chair's decision response with pydantic validation."""
-    return ChairResponse.model_validate(_parse_json_response(text))
+    return ChairResponse.model_validate(parse_json_response(text))
