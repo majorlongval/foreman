@@ -245,6 +245,60 @@ class TestRunCouncil:
         # 5 calls (4 agents + 1 chair), each with 100 input / 50 output tokens
         assert result.cost_usd > 0.0
 
+    def test_agent_calls_pass_agent_response_format(self, tmp_path: Path) -> None:
+        """run_council must pass AgentResponse as response_format to agent LLM calls."""
+        from brain.council import AgentResponse
+        agents = make_agents()
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        agent_response = '{"perspective": "I think X", "proposed_action": "do X"}'
+        chair_response = '{"decision": "do X", "action_plan": "step 1", "flag_for_jord": false, "flag_reason": ""}'
+        mock_llm = self._make_mock_llm([agent_response] * 4 + [chair_response])
+
+        config = Config(
+            daily_limit_usd=5.0, model_default="test", model_reasoning="test",
+            model_council="gemini/gemini-3-flash-preview", agents=agents,
+            council_enabled=True, max_cycles_per_day=12, telegram_enabled=True,
+        )
+
+        run_council(
+            config=config, agents=agents, survey=make_survey(),
+            philosophy="", identity_texts={a.name: "" for a in agents},
+            memory_summaries={a.name: "" for a in agents},
+            shared_memory_summary="", llm=mock_llm, journal_dir=journal_dir,
+        )
+
+        # All agent calls (first 4) should pass AgentResponse as response_format
+        for call in mock_llm.complete.call_args_list[:4]:
+            assert call.kwargs.get("response_format") == AgentResponse
+
+    def test_chair_call_passes_chair_response_format(self, tmp_path: Path) -> None:
+        """run_council must pass ChairResponse as response_format to the chair LLM call."""
+        from brain.council import ChairResponse
+        agents = make_agents()
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        agent_response = '{"perspective": "I think X", "proposed_action": "do X"}'
+        chair_response = '{"decision": "do X", "action_plan": "step 1", "flag_for_jord": false, "flag_reason": ""}'
+        mock_llm = self._make_mock_llm([agent_response] * 4 + [chair_response])
+
+        config = Config(
+            daily_limit_usd=5.0, model_default="test", model_reasoning="test",
+            model_council="gemini/gemini-3-flash-preview", agents=agents,
+            council_enabled=True, max_cycles_per_day=12, telegram_enabled=True,
+        )
+
+        run_council(
+            config=config, agents=agents, survey=make_survey(),
+            philosophy="", identity_texts={a.name: "" for a in agents},
+            memory_summaries={a.name: "" for a in agents},
+            shared_memory_summary="", llm=mock_llm, journal_dir=journal_dir,
+        )
+
+        # Last call (5th) is the chair — should pass ChairResponse
+        chair_call = mock_llm.complete.call_args_list[4]
+        assert chair_call.kwargs.get("response_format") == ChairResponse
+
     def test_chair_rotation_advances(self, tmp_path: Path) -> None:
         agents = make_agents()
         journal_dir = tmp_path / "journal"

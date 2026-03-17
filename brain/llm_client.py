@@ -153,6 +153,7 @@ class LLMClient:
         system: str,
         message: str,
         max_tokens: int = None,
+        response_format: type = None,
     ) -> LLMResponse:
         """Send a completion request to any supported provider via LiteLLM."""
         try:
@@ -170,7 +171,8 @@ class LLMClient:
             }
             if max_tokens:
                 kwargs["max_tokens"] = max_tokens
-            
+            if response_format is not None:
+                kwargs["response_format"] = response_format
             if provider == "ollama":
                 kwargs["api_base"] = self._ollama_base
 

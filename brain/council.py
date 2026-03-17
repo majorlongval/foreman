@@ -113,7 +113,8 @@ class LLMResponseLike(Protocol):
 class LLMPort(Protocol):
     """Interface for LLM calls — keeps council decoupled from provider."""
     def complete(
-        self, model: str, system: str, message: str, max_tokens: Optional[int] = None
+        self, model: str, system: str, message: str, max_tokens: Optional[int] = None,
+        response_format: Optional[type] = None,
     ) -> LLMResponseLike: ...
 
 
@@ -170,6 +171,7 @@ def run_council(
                 system=system,
                 message=user,
                 max_tokens=1024,
+                response_format=AgentResponse,
             )
             total_cost += estimate_cost(
                 config.model_council, response.input_tokens, response.output_tokens
@@ -204,6 +206,7 @@ def run_council(
             system=system,
             message=user,
             max_tokens=2048,
+            response_format=ChairResponse,
         )
         total_cost += estimate_cost(
             config.model_council, response.input_tokens, response.output_tokens
