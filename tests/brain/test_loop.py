@@ -145,6 +145,72 @@ class TestRunCycleSuccess:
         assert len(journal_files) >= 1
 
 
+class TestRunCycleInbox:
+    def test_inbox_cleared_after_successful_cycle(self, cycle_env) -> None:
+        """INBOX.md must be empty after a successful cycle."""
+        inbox = cycle_env["repo_root"] / "INBOX.md"
+        inbox.write_text("Please diversify your perspectives.")
+
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        mock_llm = MagicMock()
+        agent_resp = MagicMock()
+        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
+        agent_resp.input_tokens = 100
+        agent_resp.output_tokens = 50
+        chair_resp = MagicMock()
+        chair_resp.text = '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}'
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 100
+        executor_resp.output_tokens = 40
+        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+        assert outcome.status == "success"
+        assert inbox.read_text() == ""
+
+    def test_cycle_succeeds_without_inbox(self, cycle_env) -> None:
+        """Cycle completes normally when INBOX.md does not exist."""
+        assert not (cycle_env["repo_root"] / "INBOX.md").exists()
+
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        mock_llm = MagicMock()
+        agent_resp = MagicMock()
+        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
+        agent_resp.input_tokens = 100
+        agent_resp.output_tokens = 50
+        chair_resp = MagicMock()
+        chair_resp.text = '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}'
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 100
+        executor_resp.output_tokens = 40
+        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+        assert outcome.status == "success"
+
+
 class TestRunCycleCostPersistence:
     def test_successful_cycle_writes_cost_entry(self, cycle_env) -> None:
         """After a successful cycle, at least one cost entry must exist in today's JSONL."""

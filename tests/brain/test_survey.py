@@ -94,6 +94,64 @@ class TestReadRecentFiles(unittest.TestCase):
         self.assertEqual(results, [])
 
 
+class TestInbox(unittest.TestCase):
+    def test_inbox_included_in_context_string(self) -> None:
+        """When inbox_note is set, to_context_string includes a Notes from Jord section."""
+        result = SurveyResult(
+            budget_limit=5.0, budget_spent=0.0,
+            open_issues=[], open_prs=[],
+            recent_incidents=[], shared_decisions=[],
+            journal_last_entry=None,
+            inbox_note="Please diversify your perspectives.",
+        )
+        ctx = result.to_context_string()
+        self.assertIn("Notes from Jord", ctx)
+        self.assertIn("Please diversify your perspectives.", ctx)
+
+    def test_inbox_absent_no_notes_section(self) -> None:
+        """When inbox_note is None, to_context_string has no Notes from Jord section."""
+        result = SurveyResult(
+            budget_limit=5.0, budget_spent=0.0,
+            open_issues=[], open_prs=[],
+            recent_incidents=[], shared_decisions=[],
+            journal_last_entry=None,
+        )
+        ctx = result.to_context_string()
+        self.assertNotIn("Notes from Jord", ctx)
+
+    def test_gather_survey_reads_inbox(self) -> None:
+        """gather_survey reads INBOX.md from repo_root and sets inbox_note."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            repo_root = tmp_path / "repo"
+            repo_root.mkdir()
+            memory_root = tmp_path / "memory"
+            for d in ["costs", "decisions", "journal", "incidents"]:
+                (memory_root / "shared" / d).mkdir(parents=True)
+            (repo_root / "INBOX.md").write_text("Hello agents.")
+            mock_repo = MagicMock()
+            mock_repo.get_issues.return_value = []
+            mock_repo.get_pulls.return_value = []
+            result = gather_survey(make_config(), memory_root, mock_repo, repo_root=repo_root)
+            self.assertEqual(result.inbox_note, "Hello agents.")
+
+    def test_gather_survey_empty_inbox_returns_none(self) -> None:
+        """gather_survey returns inbox_note=None when INBOX.md is empty or absent."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            repo_root = tmp_path / "repo"
+            repo_root.mkdir()
+            memory_root = tmp_path / "memory"
+            for d in ["costs", "decisions", "journal", "incidents"]:
+                (memory_root / "shared" / d).mkdir(parents=True)
+            (repo_root / "INBOX.md").write_text("   ")  # whitespace only
+            mock_repo = MagicMock()
+            mock_repo.get_issues.return_value = []
+            mock_repo.get_pulls.return_value = []
+            result = gather_survey(make_config(), memory_root, mock_repo, repo_root=repo_root)
+            self.assertIsNone(result.inbox_note)
+
+
 class TestGatherSurvey(unittest.TestCase):
     def test_gathers_budget_from_cost_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

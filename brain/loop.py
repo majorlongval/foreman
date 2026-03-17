@@ -63,7 +63,7 @@ def run_cycle(
 
     # Step 2: Survey
     try:
-        survey = gather_survey(config, memory_root, repo)
+        survey = gather_survey(config, memory_root, repo, repo_root=repo_root)
     except Exception as e:
         log.error(f"Survey failed: {e}")
         _write_incident(memory_root, f"Survey failed: {e}")
@@ -170,6 +170,11 @@ def run_cycle(
         f"## Cost\n${total_cost:.4f}\n"
     )
     _write_journal(memory_root, journal_entry)
+
+    # Clear inbox now that agents have read it this cycle
+    inbox_path = repo_root / "INBOX.md"
+    if inbox_path.exists():
+        inbox_path.write_text("")
 
     return CycleOutcome(
         status="success",

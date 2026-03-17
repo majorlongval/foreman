@@ -29,6 +29,7 @@ class SurveyResult:
     recent_incidents: List[str]
     shared_decisions: List[str]
     journal_last_entry: Optional[str]
+    inbox_note: Optional[str] = None
 
     @property
     def budget_remaining(self) -> float:
@@ -70,6 +71,10 @@ class SurveyResult:
         if self.journal_last_entry:
             lines.append("## Last Cycle")
             lines.append(self.journal_last_entry)
+            lines.append("")
+        if self.inbox_note:
+            lines.append("## Notes from Jord")
+            lines.append(self.inbox_note)
         return "\n".join(lines)
 
 
@@ -77,6 +82,7 @@ def gather_survey(
     config: Config,
     memory_root: Path,
     repo: object,
+    repo_root: Optional[Path] = None,
 ) -> SurveyResult:
     """Gather the full survey from GitHub, memory, and budget."""
     costs_dir = memory_root / "shared" / "costs"
@@ -109,6 +115,13 @@ def gather_survey(
     journal_entries = _read_recent_files(journal_dir, limit=1)
     journal_last = journal_entries[0] if journal_entries else None
 
+    inbox_note: Optional[str] = None
+    if repo_root is not None:
+        inbox_path = repo_root / "INBOX.md"
+        if inbox_path.exists():
+            content = inbox_path.read_text().strip()
+            inbox_note = content if content else None
+
     return SurveyResult(
         budget_limit=config.daily_limit_usd,
         budget_spent=budget_spent,
@@ -117,6 +130,7 @@ def gather_survey(
         recent_incidents=recent_incidents,
         shared_decisions=shared_decisions,
         journal_last_entry=journal_last,
+        inbox_note=inbox_note,
     )
 
 
