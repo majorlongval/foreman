@@ -87,3 +87,39 @@ class TestSendTelegramTool:
             tool_context,
         )
         tool_context.notify_fn.assert_called_once_with("Hello Jord!")
+
+
+class TestApprovePrTool:
+    def test_critic_can_approve_pr(self, tmp_path: Path) -> None:
+        """An agent with role 'critic' should be able to approve a PR."""
+        memory_root = tmp_path / "memory"
+        (memory_root / "shared" / "costs").mkdir(parents=True)
+        (memory_root / "galadriel").mkdir(parents=True)
+        mock_pr = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        ctx = ToolContext(
+            repo=mock_repo,
+            memory_root=memory_root,
+            agent_name="galadriel",
+            agent_role="critic",
+            notify_fn=MagicMock(),
+            costs_dir=memory_root / "shared" / "costs",
+        )
+        result = execute_tool("approve_pr", {"pr_number": 102, "comment": "LGTM"}, ctx)
+        mock_pr.create_review.assert_called_once_with(body="LGTM", event="APPROVE")
+        assert "approved" in result.lower()
+
+    def test_non_critic_cannot_approve_pr(self, tool_context: ToolContext) -> None:
+        """Only the critic role can approve PRs."""
+        ctx = ToolContext(
+            repo=tool_context.repo,
+            memory_root=tool_context.memory_root,
+            agent_name="gimli",
+            agent_role="builder",
+            notify_fn=tool_context.notify_fn,
+            costs_dir=tool_context.costs_dir,
+        )
+        result = execute_tool("approve_pr", {"pr_number": 102, "comment": "looks good"}, ctx)
+        ctx.repo.get_pull.assert_not_called()
+        assert "only" in result.lower() or "critic" in result.lower()

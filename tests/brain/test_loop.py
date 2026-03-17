@@ -1,7 +1,7 @@
 """Tests for brain.loop — the Wiggum loop (one cycle)."""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 from pathlib import Path
 from brain.loop import run_cycle, CycleOutcome
 from brain.config import Config, AgentConfig
@@ -209,6 +209,25 @@ class TestRunCycleInbox:
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
+
+
+class TestRunCycleIncidentNotification:
+    def test_notify_called_on_survey_failure(self, cycle_env) -> None:
+        """When the survey raises, notify_fn is called with the incident content."""
+        mock_repo = MagicMock()
+        mock_llm = MagicMock()
+        notify_fn = MagicMock(return_value=True)
+
+        with patch("brain.loop.gather_survey", side_effect=Exception("Survey exploded")):
+            outcome = run_cycle(
+                config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
+                memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+                repo_root=cycle_env["repo_root"], notify_fn=notify_fn,
+            )
+
+        assert outcome.status == "error"
+        notify_fn.assert_called_once()
+        assert "Survey exploded" in notify_fn.call_args[0][0]
 
 
 class TestRunCycleOutbox:

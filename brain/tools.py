@@ -29,6 +29,7 @@ class ToolContext:
     notify_fn: Callable[[str], bool]
     costs_dir: Path
     budget_limit: float = 5.0
+    agent_role: str = ""
 
 
 TOOL_SCHEMAS = [
@@ -144,6 +145,18 @@ TOOL_SCHEMAS = [
             "type": "object",
             "properties": {},
             "required": [],
+        },
+    },
+    {
+        "name": "approve_pr",
+        "description": "Approve a pull request. Only available to the critic role.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pr_number": {"type": "integer", "description": "PR number to approve."},
+                "comment": {"type": "string", "description": "Review comment."},
+            },
+            "required": ["pr_number", "comment"],
         },
     },
 ]
@@ -280,6 +293,17 @@ def _list_prs(tool_input: dict, ctx: ToolContext) -> str:
         return f"Error listing PRs: {e}"
 
 
+def _approve_pr(tool_input: dict, ctx: ToolContext) -> str:
+    if ctx.agent_role != "critic":
+        return "Only the critic role can approve PRs."
+    try:
+        pr = ctx.repo.get_pull(tool_input["pr_number"])
+        pr.create_review(body=tool_input["comment"], event="APPROVE")
+        return f"Approved PR #{tool_input['pr_number']}."
+    except Exception as e:
+        return f"Error approving PR: {e}"
+
+
 _HANDLERS = {
     "read_file": _read_file,
     "create_issue": _create_issue,
@@ -290,4 +314,5 @@ _HANDLERS = {
     "check_budget": _check_budget,
     "list_issues": _list_issues,
     "list_prs": _list_prs,
+    "approve_pr": _approve_pr,
 }

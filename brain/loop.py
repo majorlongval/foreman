@@ -67,7 +67,7 @@ def run_cycle(
         survey = gather_survey(config, memory_root, repo, repo_root=repo_root)
     except Exception as e:
         log.error(f"Survey failed: {e}")
-        _write_incident(memory_root, f"Survey failed: {e}")
+        _write_incident(memory_root, f"Survey failed: {e}", notify_fn)
         return CycleOutcome("error", "", "", 0.0, str(e))
 
     # Step 3: Load agent identities and memories
@@ -119,15 +119,17 @@ def run_cycle(
         )
     except Exception as e:
         log.error(f"Council failed: {e}")
-        _write_incident(memory_root, f"Council failed: {e}")
+        _write_incident(memory_root, f"Council failed: {e}", notify_fn)
         return CycleOutcome("error", "", "", 0.0, str(e))
 
     # Step 5: Act — execute the action plan via tool-use LLM call
+    chair_config = next(a for a in config.agents if a.name == council_result.chair_name)
     tool_ctx = ToolContext(
         repo=repo,
         memory_root=memory_root,
         agent_name=council_result.chair_name,
-        notify_fn=lambda msg: False,  # Telegram wired in main()
+        agent_role=chair_config.role,
+        notify_fn=notify_fn or (lambda msg: False),
         costs_dir=costs_dir,
         budget_limit=config.daily_limit_usd,
     )
@@ -203,12 +205,14 @@ def _write_journal(memory_root: Path, content: str) -> None:
     (journal_dir / f"{timestamp}.md").write_text(content)
 
 
-def _write_incident(memory_root: Path, content: str) -> None:
-    """Write an incident to shared memory."""
+def _write_incident(memory_root: Path, content: str, notify_fn: object = None) -> None:
+    """Write an incident to shared memory and alert Jord via Telegram."""
     incidents_dir = memory_root / "shared" / "incidents"
     incidents_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%S")
     (incidents_dir / f"{timestamp}.md").write_text(content)
+    if notify_fn:
+        notify_fn(f"⚠️ Foreman incident:\n\n{content}")
 
 
 def main() -> None:
