@@ -211,6 +211,62 @@ class TestRunCycleInbox:
         assert outcome.status == "success"
 
 
+class TestRunCycleOutbox:
+    def _make_llm(self):
+        mock_llm = MagicMock()
+        agent_resp = MagicMock()
+        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
+        agent_resp.input_tokens = 100
+        agent_resp.output_tokens = 50
+        chair_resp = MagicMock()
+        chair_resp.text = '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}'
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 100
+        executor_resp.output_tokens = 40
+        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
+        return mock_llm
+
+    def test_outbox_triggers_notification_and_is_cleared(self, cycle_env) -> None:
+        """When OUTBOX.md has content, notify_fn is called with it and the file is cleared."""
+        outbox = cycle_env["repo_root"] / "OUTBOX.md"
+        outbox.write_text("Jord, we have a question about Issue #100.")
+
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        notify_fn = MagicMock(return_value=True)
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=self._make_llm(),
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"], notify_fn=notify_fn,
+        )
+        assert outcome.status == "success"
+        notify_fn.assert_called_once()
+        assert "question about Issue #100" in notify_fn.call_args[0][0]
+        assert outbox.read_text() == ""
+
+    def test_cycle_succeeds_without_outbox(self, cycle_env) -> None:
+        """Cycle completes normally when OUTBOX.md does not exist."""
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+        notify_fn = MagicMock(return_value=True)
+
+        outcome = run_cycle(
+            config=cycle_env["config"], repo=mock_repo, llm=self._make_llm(),
+            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"], notify_fn=notify_fn,
+        )
+        assert outcome.status == "success"
+        notify_fn.assert_not_called()
+
+
 class TestRunCycleCostPersistence:
     def test_successful_cycle_writes_cost_entry(self, cycle_env) -> None:
         """After a successful cycle, at least one cost entry must exist in today's JSONL."""

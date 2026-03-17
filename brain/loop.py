@@ -48,6 +48,7 @@ def run_cycle(
     memory_root: Path,
     philosophy: str,
     repo_root: Path,
+    notify_fn: object = None,
 ) -> CycleOutcome:
     """Run one brain cycle. This is the Wiggum loop body."""
 
@@ -176,6 +177,14 @@ def run_cycle(
     if inbox_path.exists():
         inbox_path.write_text("")
 
+    # Deliver outbox to Jord via Telegram, then clear it
+    outbox_path = repo_root / "OUTBOX.md"
+    if outbox_path.exists():
+        message = outbox_path.read_text().strip()
+        if message and notify_fn:
+            notify_fn(f"📬 Message from the council:\n\n{message}")
+        outbox_path.write_text("")
+
     return CycleOutcome(
         status="success",
         decision=council_result.decision,
@@ -238,7 +247,7 @@ def main() -> None:
     memory_root = repo_root / "memory"
 
     # Run one cycle
-    outcome = run_cycle(config, repo, llm, memory_root, philosophy, repo_root)
+    outcome = run_cycle(config, repo, llm, memory_root, philosophy, repo_root, notify_fn=notify)
     log.info(f"Cycle complete: {outcome.status}")
     if outcome.error:
         log.error(f"Error: {outcome.error}")
