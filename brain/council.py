@@ -175,6 +175,7 @@ def run_council(
                 config.model_council, response.input_tokens, response.output_tokens
             )
             parsed = parse_agent_response(response.text)
+            log.info(f"[{agent.name}] {parsed.perspective} → {parsed.proposed_action}")
             perspectives.append(AgentPerspective(
                 agent_name=agent.name,
                 perspective=parsed.perspective,
@@ -210,6 +211,9 @@ def run_council(
         parsed = parse_chair_response(response.text)
         decision = parsed.decision
         action_plan = parsed.action_plan
+        log.info(f"[{chair.name} / chair] Decision: {decision}")
+        if parsed.flag_for_jord:
+            log.warning(f"[{chair.name} / chair] Flagged for Jord: {parsed.flag_reason}")
     except Exception as e:
         log.error(f"Chair {chair.name} decision failed: {e}")
         decision = f"Chair decision failed: {e}"
