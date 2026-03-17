@@ -200,7 +200,6 @@ def run_council(
                 model=config.model_council,
                 system=system,
                 message=user,
-                max_tokens=2048,
                 response_format=AgentResponse,
             )
             total_cost += estimate_cost(
@@ -235,7 +234,6 @@ def run_council(
             model=config.model_council,
             system=system,
             message=user,
-            max_tokens=4096,  # Chair needs more tokens: decision + action_plan + assignments for all agents
             response_format=ChairResponse,
         )
         total_cost += estimate_cost(
@@ -389,13 +387,15 @@ def extract_json(text: str) -> str:
 
 
 def _fix_json(text: str) -> str:
-    """Fix common JSON issues produced by LLMs (trailing commas, Python literals)."""
+    """Fix common JSON issues produced by LLMs (trailing commas, Python literals, unquoted keys)."""
     # Remove trailing commas before closing brackets/braces
     text = re.sub(r",\s*([}\]])", r"\1", text)
     # Replace Python-style literals with JSON equivalents (outside strings is best-effort)
     text = re.sub(r"\bTrue\b", "true", text)
     text = re.sub(r"\bFalse\b", "false", text)
     text = re.sub(r"\bNone\b", "null", text)
+    # Quote unquoted object keys: match word chars not preceded by " and followed by whitespace+colon
+    text = re.sub(r'(?<!["\w])(\b[a-zA-Z_][a-zA-Z0-9_]*\b)(?=\s*:)', r'"\1"', text)
     return text
 
 

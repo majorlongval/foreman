@@ -116,7 +116,6 @@ def execute_action(
                 model=model,
                 messages=messages,
                 tools=tools,
-                max_tokens=2048,
             )
             total_cost += estimate_cost(model, response.input_tokens, response.output_tokens)
 

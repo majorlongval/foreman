@@ -143,6 +143,14 @@ class TestParseJsonResponse:
         result = parse_json_response(text)
         assert result["assignments"]["gandalf"] == "task A"
 
+    def test_unquoted_keys(self) -> None:
+        """Gemini Flash sometimes emits unquoted keys in nested objects — must be fixed."""
+        from brain.council import parse_json_response
+        text = '{decision: "build it", action_plan: "step 1", flag_for_jord: false, flag_reason: ""}'
+        result = parse_json_response(text)
+        assert result["decision"] == "build it"
+        assert result["flag_for_jord"] is False
+
     def test_python_boolean_true(self) -> None:
         from brain.council import parse_json_response
         text = '{"flag_for_jord": True, "flag_reason": "risky"}'
@@ -260,8 +268,8 @@ class TestRunCouncil:
         assert "failed" in result.perspectives[0].perspective.lower()
         assert "failed" in result.decision.lower()
 
-    def test_chair_uses_4096_max_tokens(self, tmp_path: Path) -> None:
-        """Chair call must use max_tokens=4096 — 2048 caused truncated JSON once assignments were added."""
+    def test_llm_calls_have_no_max_tokens(self, tmp_path: Path) -> None:
+        """Neither agent nor chair calls should set max_tokens — let the model decide when to stop."""
         agents = make_agents()[:1]
         journal_dir = tmp_path / "journal"
         journal_dir.mkdir()
@@ -280,31 +288,8 @@ class TestRunCouncil:
             memory_summaries={"gandalf": ""}, shared_memory_summary="",
             llm=mock_llm, journal_dir=journal_dir,
         )
-        chair_call = mock_llm.complete.call_args_list[-1]
-        assert chair_call.kwargs.get("max_tokens") == 4096
-
-    def test_agent_deliberation_uses_2048_max_tokens(self, tmp_path: Path) -> None:
-        """Agent calls must use max_tokens=2048 — 1024 caused truncated JSON in production."""
-        agents = make_agents()[:1]
-        journal_dir = tmp_path / "journal"
-        journal_dir.mkdir()
-        mock_llm = self._make_mock_llm([
-            '{"perspective": "ok", "proposed_action": "ok"}',
-            '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}',
-        ])
-        config = Config(
-            daily_limit_usd=5.0, model_default="test", model_reasoning="test",
-            model_council="gemini/gemini-3-flash-preview", agents=agents,
-            council_enabled=True, max_cycles_per_day=12, telegram_enabled=True,
-        )
-        run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={"gandalf": ""},
-            memory_summaries={"gandalf": ""}, shared_memory_summary="",
-            llm=mock_llm, journal_dir=journal_dir,
-        )
-        agent_call = mock_llm.complete.call_args_list[0]
-        assert agent_call.kwargs.get("max_tokens") == 2048
+        for call in mock_llm.complete.call_args_list:
+            assert call.kwargs.get("max_tokens") is None
 
     def test_run_council_tracks_total_cost(self, tmp_path: Path) -> None:
         """run_council sums LLM costs and stores in CouncilResult.cost_usd."""
