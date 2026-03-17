@@ -347,9 +347,24 @@ def extract_json(text: str) -> str:
     return stripped
 
 
+def _fix_json(text: str) -> str:
+    """Fix common JSON issues produced by LLMs (trailing commas, Python literals)."""
+    # Remove trailing commas before closing brackets/braces
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    # Replace Python-style literals with JSON equivalents (outside strings is best-effort)
+    text = re.sub(r"\bTrue\b", "true", text)
+    text = re.sub(r"\bFalse\b", "false", text)
+    text = re.sub(r"\bNone\b", "null", text)
+    return text
+
+
 def parse_json_response(text: str) -> dict:
     """Extract and parse JSON from an LLM response."""
-    return json.loads(extract_json(text))
+    extracted = extract_json(text)
+    try:
+        return json.loads(extracted)
+    except json.JSONDecodeError:
+        return json.loads(_fix_json(extracted))
 
 
 def parse_agent_response(text: str) -> AgentResponse:

@@ -121,6 +121,36 @@ class TestParseJsonResponse:
         with pytest.raises(json.JSONDecodeError):
             parse_json_response("not json at all")
 
+    def test_trailing_comma_in_object(self) -> None:
+        from brain.council import parse_json_response
+        text = '{"decision": "build", "action_plan": "step 1",}'
+        result = parse_json_response(text)
+        assert result["decision"] == "build"
+
+    def test_trailing_comma_in_assignments(self) -> None:
+        from brain.council import parse_json_response
+        text = '{"assignments": {"gandalf": "task A", "gimli": "task B",}}'
+        result = parse_json_response(text)
+        assert result["assignments"]["gandalf"] == "task A"
+
+    def test_python_boolean_true(self) -> None:
+        from brain.council import parse_json_response
+        text = '{"flag_for_jord": True, "flag_reason": "risky"}'
+        result = parse_json_response(text)
+        assert result["flag_for_jord"] is True
+
+    def test_python_boolean_false(self) -> None:
+        from brain.council import parse_json_response
+        text = '{"flag_for_jord": False, "flag_reason": ""}'
+        result = parse_json_response(text)
+        assert result["flag_for_jord"] is False
+
+    def test_python_none(self) -> None:
+        from brain.council import parse_json_response
+        text = '{"decision": "build", "flag_reason": None}'
+        result = parse_json_response(text)
+        assert result["flag_reason"] is None
+
 
 class TestPydanticValidation:
     def testparse_agent_response(self) -> None:
