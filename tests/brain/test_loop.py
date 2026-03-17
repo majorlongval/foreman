@@ -122,7 +122,13 @@ class TestRunCycleSuccess:
         chair_resp.text = '{"decision": "build it", "action_plan": "step 1", "flag_for_jord": false, "flag_reason": ""}'
         chair_resp.input_tokens = 200
         chair_resp.output_tokens = 100
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 100
+        executor_resp.output_tokens = 40
         mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
 
         outcome = run_cycle(
             config=cycle_env["config"],
@@ -137,6 +143,52 @@ class TestRunCycleSuccess:
         # Journal should have been written
         journal_files = list((cycle_env["memory_root"] / "shared" / "journal").glob("*.md"))
         assert len(journal_files) >= 1
+
+
+class TestRunCycleCostPersistence:
+    def test_successful_cycle_writes_cost_entry(self, cycle_env) -> None:
+        """After a successful cycle, at least one cost entry must exist in today's JSONL."""
+        import json
+        from datetime import datetime, timezone
+
+        mock_repo = MagicMock()
+        mock_repo.get_issues.return_value = []
+        mock_repo.get_pulls.return_value = []
+
+        mock_llm = MagicMock()
+        agent_resp = MagicMock()
+        agent_resp.text = '{"perspective": "lets build", "proposed_action": "create issue"}'
+        agent_resp.input_tokens = 100
+        agent_resp.output_tokens = 50
+        chair_resp = MagicMock()
+        chair_resp.text = '{"decision": "build it", "action_plan": "step 1", "flag_for_jord": false, "flag_reason": ""}'
+        chair_resp.input_tokens = 200
+        chair_resp.output_tokens = 100
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 150
+        executor_resp.output_tokens = 60
+        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
+
+        outcome = run_cycle(
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+
+        assert outcome.status == "success"
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cost_file = cycle_env["memory_root"] / "shared" / "costs" / f"{today}.jsonl"
+        assert cost_file.exists(), "Cost JSONL file should be written after a successful cycle"
+        lines = [l for l in cost_file.read_text().strip().split("\n") if l.strip()]
+        assert len(lines) >= 1
+        entry = json.loads(lines[0])
+        assert entry["cost_usd"] >= 0.0
 
 
 class TestRunCycleSurveyFailure:
@@ -155,7 +207,13 @@ class TestRunCycleSurveyFailure:
         chair_resp.text = '{"decision": "wait", "action_plan": "skip", "flag_for_jord": false, "flag_reason": ""}'
         chair_resp.input_tokens = 100
         chair_resp.output_tokens = 50
+        executor_resp = MagicMock()
+        executor_resp.tool_calls = []
+        executor_resp.text = "Done."
+        executor_resp.input_tokens = 80
+        executor_resp.output_tokens = 30
         mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete_with_tools.return_value = executor_resp
 
         outcome = run_cycle(
             config=cycle_env["config"],

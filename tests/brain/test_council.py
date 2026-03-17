@@ -220,6 +220,31 @@ class TestRunCouncil:
         assert "failed" in result.perspectives[0].perspective.lower()
         assert "failed" in result.decision.lower()
 
+    def test_run_council_tracks_total_cost(self, tmp_path: Path) -> None:
+        """run_council sums LLM costs and stores in CouncilResult.cost_usd."""
+        agents = make_agents()
+        journal_dir = tmp_path / "journal"
+        journal_dir.mkdir()
+        agent_response = '{"perspective": "I think X", "proposed_action": "do X"}'
+        chair_response = '{"decision": "do X", "action_plan": "step 1", "flag_for_jord": false, "flag_reason": ""}'
+        mock_llm = self._make_mock_llm([agent_response] * 4 + [chair_response])
+
+        config = Config(
+            daily_limit_usd=5.0, model_default="test", model_reasoning="test",
+            # Use a real model key so estimate_cost produces a non-zero value
+            model_council="gemini/gemini-3-flash-preview",
+            agents=agents, council_enabled=True, max_cycles_per_day=12, telegram_enabled=True,
+        )
+
+        result = run_council(
+            config=config, agents=agents, survey=make_survey(),
+            philosophy="Be good.", identity_texts={a.name: f"You are {a.name}" for a in agents},
+            memory_summaries={a.name: "" for a in agents},
+            shared_memory_summary="", llm=mock_llm, journal_dir=journal_dir,
+        )
+        # 5 calls (4 agents + 1 chair), each with 100 input / 50 output tokens
+        assert result.cost_usd > 0.0
+
     def test_chair_rotation_advances(self, tmp_path: Path) -> None:
         agents = make_agents()
         journal_dir = tmp_path / "journal"

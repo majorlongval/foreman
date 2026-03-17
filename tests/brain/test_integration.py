@@ -54,8 +54,15 @@ def full_env(tmp_path: Path):
     chair_resp.input_tokens = 200
     chair_resp.output_tokens = 100
 
+    executor_resp = MagicMock()
+    executor_resp.tool_calls = []
+    executor_resp.text = "Done."
+    executor_resp.input_tokens = 100
+    executor_resp.output_tokens = 40
+
     mock_llm = MagicMock()
     mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+    mock_llm.complete_with_tools.return_value = executor_resp
 
     return {
         "config": config,

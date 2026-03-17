@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from brain.config import AgentConfig, Config
 from brain.survey import SurveyResult
+from llm_client import estimate_cost
 
 log = logging.getLogger("foreman.brain.council")
 
@@ -133,6 +134,7 @@ class CouncilResult:
     chair_name: str
     decision: str
     action_plan: str
+    cost_usd: float = 0.0
 
 
 # ── Main entry point ──────────────────────────────────────────
@@ -153,6 +155,7 @@ def run_council(
 
     # Phase 1: Deliberation — one call per agent
     perspectives: List[AgentPerspective] = []
+    total_cost = 0.0
     for agent in agents:
         identity = identity_texts.get(agent.name, f"You are {agent.name}.")
         own_memory = memory_summaries.get(agent.name, "(no private memory yet)")
@@ -167,6 +170,9 @@ def run_council(
                 system=system,
                 message=user,
                 max_tokens=1024,
+            )
+            total_cost += estimate_cost(
+                config.model_council, response.input_tokens, response.output_tokens
             )
             parsed = parse_agent_response(response.text)
             perspectives.append(AgentPerspective(
@@ -198,6 +204,9 @@ def run_council(
             message=user,
             max_tokens=2048,
         )
+        total_cost += estimate_cost(
+            config.model_council, response.input_tokens, response.output_tokens
+        )
         parsed = parse_chair_response(response.text)
         decision = parsed.decision
         action_plan = parsed.action_plan
@@ -215,6 +224,7 @@ def run_council(
         chair_name=chair.name,
         decision=decision,
         action_plan=action_plan,
+        cost_usd=total_cost,
     )
 
 

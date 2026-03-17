@@ -4,7 +4,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, call
 from pathlib import Path
-from brain.executor import execute_action, to_openai_tools
+from brain.executor import execute_action, to_openai_tools, ExecutionResult
 from brain.tools import TOOL_SCHEMAS, ToolContext
 from brain.council import CouncilResult, AgentPerspective
 
@@ -54,7 +54,7 @@ class TestExecuteActionNoTools:
         council = make_council_result(action_plan="")
         mock_llm = MagicMock()
         result = execute_action(council, mock_llm, tool_ctx, "test/model")
-        assert "skipping" in result.lower()
+        assert "skipping" in result.summary.lower()
         mock_llm.complete_with_tools.assert_not_called()
 
 
@@ -66,10 +66,14 @@ class TestExecuteActionTextResponse:
         response = MagicMock()
         response.tool_calls = []
         response.text = "I reviewed the situation and no action is needed right now."
+        response.input_tokens = 200
+        response.output_tokens = 80
         mock_llm.complete_with_tools.return_value = response
 
-        result = execute_action(council, mock_llm, tool_ctx, "test/model")
-        assert "no action" in result.lower()
+        result = execute_action(council, mock_llm, tool_ctx, "gemini/gemini-3-flash-preview")
+        assert isinstance(result, ExecutionResult)
+        assert "no action" in result.summary.lower()
+        assert result.cost_usd > 0.0
 
 
 class TestExecuteActionWithToolCalls:
@@ -99,7 +103,7 @@ class TestExecuteActionWithToolCalls:
         mock_llm.complete_with_tools.side_effect = [first_response, second_response]
 
         result = execute_action(council, mock_llm, tool_ctx, "test/model")
-        assert "$" in result
+        assert "$" in result.summary
         assert mock_llm.complete_with_tools.call_count == 2
 
     def test_write_memory_tool_call(self, tool_ctx: ToolContext) -> None:
@@ -118,6 +122,8 @@ class TestExecuteActionWithToolCalls:
         first_response = MagicMock()
         first_response.tool_calls = [tool_call]
         first_response.text = ""
+        first_response.input_tokens = 100
+        first_response.output_tokens = 50
         first_response.raw_message = {"role": "assistant", "tool_calls": [
             {"id": "call_1", "type": "function", "function": {
                 "name": "write_memory",
@@ -128,6 +134,8 @@ class TestExecuteActionWithToolCalls:
         second_response = MagicMock()
         second_response.tool_calls = []
         second_response.text = "Decision recorded."
+        second_response.input_tokens = 150
+        second_response.output_tokens = 30
 
         mock_llm.complete_with_tools.side_effect = [first_response, second_response]
 
@@ -147,6 +155,8 @@ class TestExecuteActionWithToolCalls:
         response = MagicMock()
         response.tool_calls = [tool_call]
         response.text = ""
+        response.input_tokens = 100
+        response.output_tokens = 50
         response.raw_message = {"role": "assistant", "tool_calls": [
             {"id": "call_n", "type": "function", "function": {"name": "check_budget", "arguments": "{}"}}
         ]}
@@ -155,7 +165,7 @@ class TestExecuteActionWithToolCalls:
 
         result = execute_action(council, mock_llm, tool_ctx, "test/model", max_rounds=3)
         assert mock_llm.complete_with_tools.call_count == 3
-        assert "max rounds" in result.lower()
+        assert "max rounds" in result.summary.lower()
 
 
 class TestExecuteActionLLMFailure:
@@ -165,5 +175,5 @@ class TestExecuteActionLLMFailure:
         mock_llm.complete_with_tools.side_effect = Exception("API down")
 
         result = execute_action(council, mock_llm, tool_ctx, "test/model")
-        assert "error" in result.lower()
-        assert "API down" in result
+        assert "error" in result.summary.lower()
+        assert "API down" in result.summary

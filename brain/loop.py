@@ -130,12 +130,34 @@ def run_cycle(
         costs_dir=costs_dir,
         budget_limit=config.daily_limit_usd,
     )
-    action_result = execute_action(
+    execution = execute_action(
         council_result, llm, tool_ctx, config.model_default,
     )
     log.info(f"Council decided: {council_result.decision}")
 
-    # Step 6: Reflect
+    # Step 6: Persist costs — council calls + executor calls as two entries
+    append_cost_entry(
+        costs_dir,
+        agent=council_result.chair_name,
+        model=config.model_council,
+        action="council",
+        input_tokens=0,   # tokens already summed into cost_usd by run_council
+        output_tokens=0,
+        cost_usd=council_result.cost_usd,
+    )
+    append_cost_entry(
+        costs_dir,
+        agent=council_result.chair_name,
+        model=config.model_default,
+        action="execution",
+        input_tokens=0,
+        output_tokens=0,
+        cost_usd=execution.cost_usd,
+    )
+
+    total_cost = council_result.cost_usd + execution.cost_usd
+
+    # Step 7: Reflect
     journal_entry = (
         f"# Cycle {datetime.now(timezone.utc).isoformat()}\n\n"
         f"Chair: {council_result.chair_name}\n\n"
@@ -144,15 +166,16 @@ def run_cycle(
             f"- **{p.agent_name}**: {p.perspective}" for p in council_result.perspectives
         )
         + f"\n\n## Decision\n{council_result.decision}\n\n"
-        f"## Action Plan\n{council_result.action_plan}\n"
+        f"## Action Plan\n{council_result.action_plan}\n\n"
+        f"## Cost\n${total_cost:.4f}\n"
     )
     _write_journal(memory_root, journal_entry)
 
     return CycleOutcome(
         status="success",
         decision=council_result.decision,
-        action_result=action_result,
-        cost=0.0,  # TODO: track actual LLM costs from council
+        action_result=execution.summary,
+        cost=total_cost,
         error=None,
     )
 

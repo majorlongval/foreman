@@ -12,15 +12,24 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from typing import List
 
 from brain.council import CouncilResult
 from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
+from llm_client import estimate_cost
 
 log = logging.getLogger("foreman.brain.executor")
 
 # Max tool-use rounds per action to prevent runaway loops
 DEFAULT_MAX_ROUNDS = 5
+
+
+@dataclass
+class ExecutionResult:
+    """Result of executing a council action plan."""
+    summary: str
+    cost_usd: float = 0.0
 
 
 def to_openai_tools(schemas: list[dict]) -> list[dict]:
@@ -44,7 +53,7 @@ def execute_action(
     tool_ctx: ToolContext,
     model: str,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
-) -> str:
+) -> ExecutionResult:
     """Execute the council's action plan via LLM tool-use loop.
 
     Args:
@@ -55,10 +64,10 @@ def execute_action(
         max_rounds: Safety limit on tool-use rounds
 
     Returns:
-        Summary string of what was done
+        ExecutionResult with summary of what was done and total cost in USD
     """
     if not council_result.action_plan:
-        return "No action plan — skipping execution."
+        return ExecutionResult(summary="No action plan — skipping execution.")
 
     tools = to_openai_tools(TOOL_SCHEMAS)
     system = (
@@ -80,6 +89,7 @@ def execute_action(
     ]
 
     actions_taken: List[str] = []
+    total_cost = 0.0
 
     try:
         for round_num in range(max_rounds):
@@ -89,10 +99,12 @@ def execute_action(
                 tools=tools,
                 max_tokens=2048,
             )
+            total_cost += estimate_cost(model, response.input_tokens, response.output_tokens)
 
             if not response.tool_calls:
                 # LLM is done — return its final text
-                return response.text or _summarize_actions(actions_taken)
+                summary = response.text or _summarize_actions(actions_taken)
+                return ExecutionResult(summary=summary, cost_usd=total_cost)
 
             # Process each tool call
             # Append assistant message with tool calls to conversation
@@ -118,12 +130,14 @@ def execute_action(
 
         # Hit max rounds
         log.warning(f"Executor hit max rounds ({max_rounds})")
-        return f"Reached max rounds ({max_rounds}). " + _summarize_actions(actions_taken)
+        summary = f"Reached max rounds ({max_rounds}). " + _summarize_actions(actions_taken)
+        return ExecutionResult(summary=summary, cost_usd=total_cost)
 
     except Exception as e:
         log.error(f"Executor error: {e}")
-        summary = _summarize_actions(actions_taken)
-        return f"Execution error: {e}" + (f"\nCompleted before error: {summary}" if summary else "")
+        done = _summarize_actions(actions_taken)
+        summary = f"Execution error: {e}" + (f"\nCompleted before error: {done}" if done else "")
+        return ExecutionResult(summary=summary, cost_usd=total_cost)
 
 
 def _summarize_actions(actions: List[str]) -> str:
