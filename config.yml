@@ -13,7 +13,7 @@ models:
   default: "gemini/gemini-3-flash-preview"
   reasoning: "gemini/gemini-3-flash-preview"
   council: "gemini/gemini-3-flash-preview"
-  elrond: "gemini/gemini-3-pro-preview"
+  elrond: "gemini/gemini-3-flash-preview"
 
 # -- Agent Roster (agents can propose additions/removals) --
 agents:
