@@ -1,7 +1,9 @@
 """Tests for brain.llm_client — provider-agnostic LLM interface."""
 
 from unittest.mock import MagicMock, patch
+
 from pydantic import BaseModel
+
 from brain.llm_client import LLMClient
 
 

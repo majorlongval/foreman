@@ -101,7 +101,7 @@ def gather_survey(
     try:
         for issue in repo.get_issues(state="open"):
             if issue.pull_request is None:
-                labels = ", ".join(l.name for l in issue.labels)
+                labels = ", ".join(label.name for label in issue.labels)
                 label_str = f" [{labels}]" if labels else ""
                 open_issues.append(f"#{issue.number}: {issue.title}{label_str}")
     except Exception as e:

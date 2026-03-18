@@ -1,10 +1,12 @@
 """Tests for brain.tools — seed toolset definitions and execution."""
 
-import pytest
-from unittest.mock import MagicMock, call
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 from github import GithubException
-from brain.tools import TOOL_SCHEMAS, execute_tool, ToolContext
+
+from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 
 
 @pytest.fixture
@@ -82,7 +84,7 @@ class TestCheckBudgetTool:
 
 class TestSendTelegramTool:
     def test_calls_notify(self, tool_context: ToolContext) -> None:
-        result = execute_tool(
+        execute_tool(
             "send_telegram",
             {"message": "Hello Jord!"},
             tool_context,
@@ -186,6 +188,67 @@ class TestReadPrTool:
         tool_context.repo.get_pull.side_effect = Exception("Not found")
         result = execute_tool("read_pr", {"pr_number": 999}, tool_context)
         assert "error" in result.lower()
+
+    def test_includes_passing_ci_checks(self, tool_context: ToolContext) -> None:
+        """read_pr must show CI check results so Galadriel can block on failures."""
+        check = MagicMock()
+        check.name = "lint"
+        check.conclusion = "success"
+        commit = MagicMock()
+        commit.get_check_runs.return_value = [check]
+        tool_context.repo.get_commit.return_value = commit
+
+        mock_pr = MagicMock()
+        mock_pr.title = "T"
+        mock_pr.body = "B"
+        mock_pr.number = 42
+        mock_pr.head.sha = "abc123"
+        mock_pr.get_files.return_value = []
+        mock_pr.get_issue_comments.return_value = []
+        tool_context.repo.get_pull.return_value = mock_pr
+
+        result = execute_tool("read_pr", {"pr_number": 42}, tool_context)
+        assert "lint" in result
+        assert "success" in result
+
+    def test_includes_failing_ci_checks(self, tool_context: ToolContext) -> None:
+        """A failing check must be clearly visible so Galadriel refuses to approve."""
+        check = MagicMock()
+        check.name = "lint"
+        check.conclusion = "failure"
+        commit = MagicMock()
+        commit.get_check_runs.return_value = [check]
+        tool_context.repo.get_commit.return_value = commit
+
+        mock_pr = MagicMock()
+        mock_pr.title = "T"
+        mock_pr.body = "B"
+        mock_pr.number = 42
+        mock_pr.head.sha = "abc123"
+        mock_pr.get_files.return_value = []
+        mock_pr.get_issue_comments.return_value = []
+        tool_context.repo.get_pull.return_value = mock_pr
+
+        result = execute_tool("read_pr", {"pr_number": 42}, tool_context)
+        assert "lint" in result
+        assert "failure" in result
+
+    def test_ci_checks_fetch_failure_does_not_break_read_pr(self, tool_context: ToolContext) -> None:
+        """If the checks API fails, read_pr should still return the rest of the PR."""
+        tool_context.repo.get_commit.side_effect = Exception("API error")
+
+        mock_pr = MagicMock()
+        mock_pr.title = "My PR"
+        mock_pr.body = "B"
+        mock_pr.number = 42
+        mock_pr.head.sha = "abc123"
+        mock_pr.get_files.return_value = []
+        mock_pr.get_issue_comments.return_value = []
+        tool_context.repo.get_pull.return_value = mock_pr
+
+        result = execute_tool("read_pr", {"pr_number": 42}, tool_context)
+        assert "My PR" in result  # still returns PR content
+        assert "error" not in result.lower()  # does not surface the checks error
 
 
 class TestPostCommentTool:

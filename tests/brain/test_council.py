@@ -1,15 +1,16 @@
 """Tests for brain.council — Elrond orchestrator replaces deliberation+chair."""
 
-import pytest
-from unittest.mock import MagicMock, call
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+from brain.config import AgentConfig, Config
 from brain.council import (
-    AgentPerspective,
     AgentAssignment,
     CouncilResult,
     run_council,
 )
-from brain.config import Config, AgentConfig
 from brain.survey import SurveyResult
 
 # Reusable phases-format Elrond response for 4 worker agents
@@ -113,8 +114,9 @@ class TestParseJsonResponse:
         assert result["decision"] == "build"
 
     def test_malformed_json_raises(self) -> None:
-        from brain.council import parse_json_response
         import json
+
+        from brain.council import parse_json_response
         with pytest.raises(json.JSONDecodeError):
             parse_json_response("not json at all")
 
@@ -180,8 +182,9 @@ class TestPydanticValidation:
         assert result.flag_reason == "disagreement"
 
     def test_agent_response_missing_field_raises(self) -> None:
-        from brain.council import parse_agent_response
         from pydantic import ValidationError
+
+        from brain.council import parse_agent_response
         with pytest.raises(ValidationError):
             parse_agent_response('{"perspective": "test"}')
 
@@ -190,7 +193,7 @@ class TestPydanticValidation:
         from brain.council import parse_chair_response
         text = (
             '{"decision": "build it", "action_plan": "step 1",'
-            '"phases": [[{"agent": "gandalf", "task": "scout the repo", "deliverable": "memory/gandalf/cycle_notes.md"},'
+            '"phases": [[{"agent": "gandalf", "task": "scout the repo", "deliverable": "memory/gandalf/cycle_notes.md"},'  # noqa: E501
             '{"agent": "gimli", "task": "open a PR", "deliverable": "PR opened"}]],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )

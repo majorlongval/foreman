@@ -1,17 +1,17 @@
 """Tests for brain.config — config.yml loading and validation."""
 
-import unittest
-import tempfile
-import yaml
-import sys
 import os
+import sys
+import tempfile
+import unittest
 from pathlib import Path
+
+import yaml
 
 # Ensure project root is in path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from brain.config import Config, AgentConfig, load_config
-
+from brain.config import AgentConfig, Config, load_config
 
 SAMPLE_CONFIG = {
     "budget": {"daily_limit_usd": 5.00},

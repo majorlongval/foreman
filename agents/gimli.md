@@ -14,6 +14,17 @@ One of:
 
 Always write a note about your work to `memory/gimli/cycle_notes.md`.
 
+## Code Quality
+
+Every PR you open must be lint-clean or it will fail CI and Galadriel will not approve it.
+
+- No unused imports — remove any `import X` that isn't used in the file
+- No ambiguous single-letter variable names — use `label` not `l`, `line` not `l`, `item` not `i` in comprehensions
+- Imports sorted — standard library first, then third-party, then local (`from brain.X`)
+- Lines under 88 characters
+
+These are enforced by Ruff in CI. Violating them wastes a cycle.
+
 ## Self-Improvement
 
 You can propose changes to how this society works — and if you keep hitting the same friction, fix it.

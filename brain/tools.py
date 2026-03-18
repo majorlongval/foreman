@@ -10,11 +10,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 from github import GithubException
-from brain.memory import MemoryStore
+
 from brain.cost_tracking import load_today_spend
+from brain.memory import MemoryStore
 
 log = logging.getLogger("foreman.brain.tools")
 
@@ -88,11 +89,11 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "read_memory",
-        "description": "Read a memory file. Use 'agent_name/file.md' for own memory or 'shared/subdir/file.md' for shared.",
+        "description": "Read a memory file. Use 'agent_name/file.md' for own memory or 'shared/subdir/file.md' for shared.",  # noqa: E501
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Memory path (e.g., 'gandalf/notes.md' or 'shared/costs/2026-03-15.md')."},
+                "path": {"type": "string", "description": "Memory path (e.g., 'gandalf/notes.md' or 'shared/costs/2026-03-15.md')."},  # noqa: E501
             },
             "required": ["path"],
         },
@@ -184,7 +185,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "list_files",
-        "description": "List files and directories in a repo path. Use this to explore the repo before proposing changes.",
+        "description": "List files and directories in a repo path. Use this to explore the repo before proposing changes.",  # noqa: E501
         "input_schema": {
             "type": "object",
             "properties": {
@@ -365,7 +366,7 @@ def _list_issues(tool_input: dict, ctx: ToolContext) -> str:
         real = [i for i in issues if i.pull_request is None]
         lines = [f"# Open Issues ({len(real)})"]
         for i in real:
-            labels = ", ".join(l.name for l in i.labels)
+            labels = ", ".join(label.name for label in i.labels)
             label_str = f" [{labels}]" if labels else ""
             lines.append(f"  - #{i.number}: {i.title}{label_str}")
         return "\n".join(lines)
@@ -419,6 +420,16 @@ def _read_pr(tool_input: dict, ctx: ToolContext) -> str:
             parts.append("\n## Comments")
             for c in comments:
                 parts.append(f"**{c.user.login}:** {c.body}")
+        # CI check results — Galadriel must not approve PRs with failing checks.
+        # Fetch via the head commit's check runs; silently skip if unavailable.
+        try:
+            check_runs = list(ctx.repo.get_commit(pr.head.sha).get_check_runs())
+            if check_runs:
+                parts.append("\n## CI Checks")
+                for run in check_runs:
+                    parts.append(f"  - {run.name}: {run.conclusion or run.status}")
+        except Exception:
+            pass
         return "\n".join(parts)
     except Exception as e:
         return f"Error reading PR #{tool_input['pr_number']}: {e}"

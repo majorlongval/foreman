@@ -15,8 +15,8 @@ import logging
 from dataclasses import dataclass
 from typing import List
 
-from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 from brain.llm_client import estimate_cost
+from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 
 log = logging.getLogger("foreman.brain.executor")
 

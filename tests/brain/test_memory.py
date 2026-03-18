@@ -1,9 +1,9 @@
 """Tests for brain.memory — read/write with privacy enforcement."""
 
-import unittest
-import tempfile
-import sys
 import os
+import sys
+import tempfile
+import unittest
 from pathlib import Path
 
 # Ensure project root is in path for imports

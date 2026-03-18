@@ -1,10 +1,12 @@
 """Tests for brain.executor — tool-use execution loop."""
 
 import json
-import pytest
-from unittest.mock import MagicMock, call
 from pathlib import Path
-from brain.executor import execute_action, to_openai_tools, ExecutionResult
+from unittest.mock import MagicMock
+
+import pytest
+
+from brain.executor import ExecutionResult, execute_action, to_openai_tools
 from brain.tools import TOOL_SCHEMAS, ToolContext
 
 
@@ -191,7 +193,7 @@ class TestExecuteActionWithToolCalls:
 
         mock_llm.complete_with_tools.side_effect = [first_response, second_response]
 
-        result = execute_action(
+        execute_action(
             task="Write a decision", agent_name="gandalf", decision="document",
             llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
         )

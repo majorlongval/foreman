@@ -6,3 +6,4 @@ venv/
 cost_log.jsonl
 *.log
 .DS_Store
+.claude/
