@@ -1,6 +1,7 @@
 """Tests for the Backlog Hygiene deduplication logic."""
 
 from typing import Any, Dict, List
+
 from brain.hygiene import Deduplicator
 
 
