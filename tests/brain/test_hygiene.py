@@ -1,9 +1,10 @@
 """Tests for the Backlog Hygiene deduplication logic."""
 
+from typing import Any, Dict, List
 from brain.hygiene import Deduplicator
 
 
-def test_deduplicator_similarity():
+def test_deduplicator_similarity() -> None:
     """Test the Jaccard similarity calculation with normalization."""
     dedup = Deduplicator()
     assert dedup.calculate_similarity("Fix the bug", "Fix the bug") == 1.0
@@ -13,9 +14,9 @@ def test_deduplicator_similarity():
     assert dedup.calculate_similarity("", "Something") == 0.0
 
 
-def test_find_potential_duplicates():
+def test_find_potential_duplicates() -> None:
     """Test the detection of potential duplicate issues."""
-    issues = [
+    issues: List[Dict[str, Any]] = [
         {
             "number": 1,
             "title": "Implement issue management",
@@ -47,9 +48,9 @@ def test_find_potential_duplicates():
     assert found_1_2
 
 
-def test_deduplicator_missing_body():
+def test_deduplicator_missing_body() -> None:
     """Ensure missing or empty bodies are handled robustly."""
-    issues = [
+    issues: List[Dict[str, Any]] = [
         {"number": 1, "title": "Test Issue", "body": None},
         {"number": 2, "title": "Test Issue", "body": ""},
     ]
@@ -61,9 +62,9 @@ def test_deduplicator_missing_body():
     assert round(duplicates[0][2], 2) == 0.7
 
 
-def test_configurable_weights():
+def test_configurable_weights() -> None:
     """Test that changing weights affects the similarity score."""
-    issues = [
+    issues: List[Dict[str, Any]] = [
         {"number": 1, "title": "A", "body": "B"},
         {"number": 2, "title": "A", "body": "C"},
     ]
@@ -79,11 +80,11 @@ def test_configurable_weights():
     assert round(duplicates2[0][2], 2) == 0.50
 
 
-def test_default_threshold():
+def test_default_threshold() -> None:
     """Verify that similar issues pass the default threshold."""
     dedup = Deduplicator()
     # Very similar titles
-    issues = [
+    issues: List[Dict[str, Any]] = [
         {
             "number": 1,
             "title": "Fix the logic bug in core",
