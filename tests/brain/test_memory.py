@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 # Ensure project root is in path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from brain.memory import MemoryStore
 

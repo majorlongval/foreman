@@ -93,7 +93,10 @@ TOOL_SCHEMAS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Memory path (e.g., 'gandalf/notes.md' or 'shared/costs/2026-03-15.md')."},  # noqa: E501
+                "path": {
+                    "type": "string",
+                    "description": "Memory path (e.g., 'gandalf/notes.md' or 'shared/costs/2026-03-15.md').",
+                },  # noqa: E501
             },
             "required": ["path"],
         },
@@ -272,6 +275,7 @@ def execute_tool(name: str, tool_input: dict, ctx: ToolContext) -> str:
 
 
 # ── Handler implementations ──────────────────────────────────
+
 
 def _read_file(tool_input: dict, ctx: ToolContext) -> str:
     try:
@@ -465,7 +469,7 @@ def _list_files(tool_input: dict, ctx: ToolContext) -> str:
         # get_contents returns a single object for a file, list for a dir
         if not isinstance(contents, list):
             contents = [contents]
-        lines = [f"# Contents of '{path or '/'}'" ]
+        lines = [f"# Contents of '{path or '/'}'"]
         for entry in contents:
             label = f"{entry.name}/" if entry.type == "dir" else entry.name
             lines.append(f"  {label}")

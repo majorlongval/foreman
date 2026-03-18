@@ -184,7 +184,7 @@ def run_cycle(
         agent=council_result.chair_name,
         model=config.model_council,
         action="council",
-        input_tokens=0,   # tokens already summed into cost_usd by run_council
+        input_tokens=0,  # tokens already summed into cost_usd by run_council
         output_tokens=0,
         cost_usd=council_result.cost_usd,
     )
@@ -221,7 +221,6 @@ def run_cycle(
         cost=total_cost,
         error=None,
     )
-
 
 
 def _write_journal(memory_root: Path, content: str) -> None:

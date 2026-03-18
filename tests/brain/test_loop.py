@@ -11,9 +11,7 @@ from brain.loop import CycleOutcome, run_cycle
 
 # Standard Elrond response for tests — one LLM call, no deliberation
 _ELROND_RESPONSE = (
-    '{"decision": "build it", "action_plan": "step 1",'
-    '"phases": [],'
-    '"flag_for_jord": false, "flag_reason": ""}'
+    '{"decision": "build it", "action_plan": "step 1","phases": [],"flag_for_jord": false, "flag_reason": ""}'
 )
 
 
@@ -40,8 +38,7 @@ def cycle_env(tmp_path: Path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     memory_root = tmp_path / "memory"
-    for d in ["shared/costs", "shared/decisions", "shared/journal", "shared/incidents",
-              "gandalf", "gimli"]:
+    for d in ["shared/costs", "shared/decisions", "shared/journal", "shared/incidents", "gandalf", "gimli"]:
         (memory_root / d).mkdir(parents=True)
 
     # Write philosophy
@@ -86,12 +83,19 @@ def _make_executor_side_effect() -> itertools.cycle:
     tool_resp.text = ""
     tool_resp.input_tokens = 100
     tool_resp.output_tokens = 40
-    tool_resp.raw_message = {"role": "assistant", "tool_calls": [
-        {"id": "call_wm", "type": "function", "function": {
-            "name": "write_memory",
-            "arguments": '{"agent_name": "agent", "filename": "cycle_notes.md", "content": "done"}',
-        }}
-    ]}
+    tool_resp.raw_message = {
+        "role": "assistant",
+        "tool_calls": [
+            {
+                "id": "call_wm",
+                "type": "function",
+                "function": {
+                    "name": "write_memory",
+                    "arguments": '{"agent_name": "agent", "filename": "cycle_notes.md", "content": "done"}',
+                },
+            }
+        ],
+    }
 
     done_resp = MagicMock()
     done_resp.tool_calls = []
@@ -149,12 +153,11 @@ class TestRunCycleBudgetExhausted:
     def test_exits_early_when_budget_spent(self, cycle_env) -> None:
         import json
         from datetime import datetime, timezone
+
         # Write cost entries exceeding the budget
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         costs_dir = cycle_env["memory_root"] / "shared" / "costs"
-        (costs_dir / f"{today}.jsonl").write_text(
-            json.dumps({"cost_usd": 10.0}) + "\n"
-        )
+        (costs_dir / f"{today}.jsonl").write_text(json.dumps({"cost_usd": 10.0}) + "\n")
         mock_repo = MagicMock()
         mock_llm = MagicMock()
 
@@ -179,7 +182,9 @@ class TestRunCycleSuccess:
         mock_llm = MagicMock()
         # Elrond makes exactly 1 LLM call — return Elrond response
         elrond_resp = MagicMock()
-        elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'  # noqa: E501
+        elrond_resp.text = (
+            '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'  # noqa: E501
+        )
         elrond_resp.input_tokens = 200
         elrond_resp.output_tokens = 100
         mock_llm.complete.return_value = elrond_resp
@@ -214,8 +219,11 @@ class TestRunCycleInbox:
         mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
@@ -233,8 +241,11 @@ class TestRunCycleInbox:
         mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
@@ -249,9 +260,13 @@ class TestRunCycleIncidentNotification:
 
         with patch("brain.loop.gather_survey", side_effect=Exception("Survey exploded")):
             outcome = run_cycle(
-                config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
-                memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
-                repo_root=cycle_env["repo_root"], notify_fn=notify_fn,
+                config=cycle_env["config"],
+                repo=mock_repo,
+                llm=mock_llm,
+                memory_root=cycle_env["memory_root"],
+                philosophy=cycle_env["philosophy"],
+                repo_root=cycle_env["repo_root"],
+                notify_fn=notify_fn,
             )
 
         assert outcome.status == "error"
@@ -277,9 +292,13 @@ class TestRunCycleOutbox:
         notify_fn = MagicMock(return_value=True)
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=self._make_llm(),
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
-            repo_root=cycle_env["repo_root"], notify_fn=notify_fn,
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=self._make_llm(),
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+            notify_fn=notify_fn,
         )
         assert outcome.status == "success"
         notify_fn.assert_called_once()
@@ -294,9 +313,13 @@ class TestRunCycleOutbox:
         notify_fn = MagicMock(return_value=True)
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=self._make_llm(),
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
-            repo_root=cycle_env["repo_root"], notify_fn=notify_fn,
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=self._make_llm(),
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+            notify_fn=notify_fn,
         )
         assert outcome.status == "success"
         notify_fn.assert_not_called()
@@ -322,8 +345,11 @@ class TestRunCycleMultiAgentExecution:
         mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
@@ -349,8 +375,11 @@ class TestRunCycleMultiAgentExecution:
         mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
@@ -377,7 +406,7 @@ class TestRunCyclePhases:
             '"phases": ['
             '  [{"agent": "gandalf", "task": "scout first", "deliverable": "memory/gandalf/cycle_notes.md"}],'
             '  [{"agent": "gimli", "task": "build after scout", "deliverable": "issue created"}]'
-            '],'
+            "],"
             '"flag_for_jord": false, "flag_reason": ""}'
         )
         elrond_resp.input_tokens = 200
@@ -401,8 +430,11 @@ class TestRunCyclePhases:
         mock_llm.complete_with_tools.side_effect = executor_side_effect
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
@@ -426,8 +458,11 @@ class TestRunCyclePhases:
         mock_llm.complete_with_tools.side_effect = self._make_executor_resp()
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
@@ -453,8 +488,11 @@ class TestRunCyclePhases:
         mock_llm.complete_with_tools.side_effect = self._make_executor_resp()
 
         outcome = run_cycle(
-            config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
-            memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+            config=cycle_env["config"],
+            repo=mock_repo,
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
             repo_root=cycle_env["repo_root"],
         )
         # Aragorn is skipped; gandalf still runs (2 rounds: tool + done)
@@ -492,10 +530,14 @@ class TestRunCycleSharedMemory:
             return original_run_council(**kwargs)
 
         from unittest.mock import patch
+
         with patch("brain.loop.run_council", side_effect=capture_run_council):
             outcome = run_cycle(
-                config=cycle_env["config"], repo=mock_repo, llm=self._make_cycle_llm(),
-                memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
+                config=cycle_env["config"],
+                repo=mock_repo,
+                llm=self._make_cycle_llm(),
+                memory_root=cycle_env["memory_root"],
+                philosophy=cycle_env["philosophy"],
                 repo_root=cycle_env["repo_root"],
             )
 
@@ -516,7 +558,9 @@ class TestRunCycleCostPersistence:
 
         mock_llm = MagicMock()
         elrond_resp = MagicMock()
-        elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'  # noqa: E501
+        elrond_resp.text = (
+            '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'  # noqa: E501
+        )
         elrond_resp.input_tokens = 100
         elrond_resp.output_tokens = 50
         mock_llm.complete.return_value = elrond_resp

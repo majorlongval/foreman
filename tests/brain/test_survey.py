@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # Ensure project root is in path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from brain.config import AgentConfig, Config
 from brain.survey import SurveyResult, _read_recent_files, gather_survey
@@ -35,25 +35,32 @@ def make_config(daily_limit: float = 5.0) -> Config:
 class TestSurveyResult(unittest.TestCase):
     def test_budget_remaining(self) -> None:
         result = SurveyResult(
-            budget_limit=5.0, budget_spent=1.50,
-            open_issues=[], open_prs=[],
-            recent_incidents=[], shared_decisions=[],
+            budget_limit=5.0,
+            budget_spent=1.50,
+            open_issues=[],
+            open_prs=[],
+            recent_incidents=[],
+            shared_decisions=[],
             journal_last_entry=None,
         )
         self.assertEqual(result.budget_remaining, 3.50)
 
     def test_budget_exhausted(self) -> None:
         result = SurveyResult(
-            budget_limit=5.0, budget_spent=5.50,
-            open_issues=[], open_prs=[],
-            recent_incidents=[], shared_decisions=[],
+            budget_limit=5.0,
+            budget_spent=5.50,
+            open_issues=[],
+            open_prs=[],
+            recent_incidents=[],
+            shared_decisions=[],
             journal_last_entry=None,
         )
         self.assertTrue(result.budget_exhausted)
 
     def test_to_context_string_includes_budget(self) -> None:
         result = SurveyResult(
-            budget_limit=5.0, budget_spent=2.0,
+            budget_limit=5.0,
+            budget_spent=2.0,
             open_issues=["#95: Auto-promote"],
             open_prs=["PR #99: Fix thing"],
             recent_incidents=[],
@@ -99,9 +106,12 @@ class TestInbox(unittest.TestCase):
     def test_inbox_included_in_context_string(self) -> None:
         """When inbox_note is set, to_context_string includes a Notes from Jord section."""
         result = SurveyResult(
-            budget_limit=5.0, budget_spent=0.0,
-            open_issues=[], open_prs=[],
-            recent_incidents=[], shared_decisions=[],
+            budget_limit=5.0,
+            budget_spent=0.0,
+            open_issues=[],
+            open_prs=[],
+            recent_incidents=[],
+            shared_decisions=[],
             journal_last_entry=None,
             inbox_note="Please diversify your perspectives.",
         )
@@ -112,9 +122,12 @@ class TestInbox(unittest.TestCase):
     def test_inbox_absent_no_notes_section(self) -> None:
         """When inbox_note is None, to_context_string has no Notes from Jord section."""
         result = SurveyResult(
-            budget_limit=5.0, budget_spent=0.0,
-            open_issues=[], open_prs=[],
-            recent_incidents=[], shared_decisions=[],
+            budget_limit=5.0,
+            budget_spent=0.0,
+            open_issues=[],
+            open_prs=[],
+            recent_incidents=[],
+            shared_decisions=[],
             journal_last_entry=None,
         )
         ctx = result.to_context_string()
@@ -163,9 +176,12 @@ class TestPrCommentsSurvey(unittest.TestCase):
     def test_pr_comments_included_in_context_string(self) -> None:
         """When a PR has comments, to_context_string shows them under the PR."""
         result = SurveyResult(
-            budget_limit=5.0, budget_spent=0.0,
-            open_issues=[], open_prs=[],
-            recent_incidents=[], shared_decisions=[],
+            budget_limit=5.0,
+            budget_spent=0.0,
+            open_issues=[],
+            open_prs=[],
+            recent_incidents=[],
+            shared_decisions=[],
             journal_last_entry=None,
             pr_comments={"PR #42: Add executor": ["galadriel: Missing tests."]},
         )
@@ -175,9 +191,12 @@ class TestPrCommentsSurvey(unittest.TestCase):
     def test_pr_comments_absent_when_empty(self) -> None:
         """When no PR comments, to_context_string has no comments section."""
         result = SurveyResult(
-            budget_limit=5.0, budget_spent=0.0,
-            open_issues=[], open_prs=[],
-            recent_incidents=[], shared_decisions=[],
+            budget_limit=5.0,
+            budget_spent=0.0,
+            open_issues=[],
+            open_prs=[],
+            recent_incidents=[],
+            shared_decisions=[],
             journal_last_entry=None,
         )
         ctx = result.to_context_string()

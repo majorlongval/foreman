@@ -45,8 +45,12 @@ class TestExecuteActionNoTools:
     def test_empty_task_skips(self, tool_ctx: ToolContext) -> None:
         mock_llm = MagicMock()
         result = execute_action(
-            task="", agent_name="gandalf", decision="explore",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            task="",
+            agent_name="gandalf",
+            decision="explore",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
         assert "skipping" in result.summary.lower()
         mock_llm.complete_with_tools.assert_not_called()
@@ -78,11 +82,19 @@ class TestExecuteActionDeliverableEnforcement:
         second_response.text = ""
         second_response.input_tokens = 120
         second_response.output_tokens = 50
-        second_response.raw_message = {"role": "assistant", "tool_calls": [
-            {"id": "call_1", "type": "function", "function": {
-                "name": "create_issue", "arguments": '{"title": "Missing feature", "body": "details"}'
-            }}
-        ]}
+        second_response.raw_message = {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "create_issue",
+                        "arguments": '{"title": "Missing feature", "body": "details"}',
+                    },
+                }
+            ],
+        }
 
         # Round 3: done
         third_response = MagicMock()
@@ -94,8 +106,12 @@ class TestExecuteActionDeliverableEnforcement:
         mock_llm.complete_with_tools.side_effect = [first_response, second_response, third_response]
 
         execute_action(
-            task="Create an issue for the missing feature", agent_name="gandalf",
-            decision="scout", llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            task="Create an issue for the missing feature",
+            agent_name="gandalf",
+            decision="scout",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
 
         # Must have made at least 2 calls (pushback + retry), not just 1
@@ -119,8 +135,12 @@ class TestExecuteActionTextResponse:
         mock_llm.complete_with_tools.return_value = response
 
         result = execute_action(
-            task="Review current state", agent_name="gandalf", decision="assess",
-            llm=mock_llm, tool_ctx=tool_ctx, model="gemini/gemini-3-flash-preview",
+            task="Review current state",
+            agent_name="gandalf",
+            decision="assess",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="gemini/gemini-3-flash-preview",
         )
         assert isinstance(result, ExecutionResult)
         assert "no action" in result.summary.lower()
@@ -142,9 +162,12 @@ class TestExecuteActionWithToolCalls:
         first_response.text = ""
         first_response.input_tokens = 100
         first_response.output_tokens = 50
-        first_response.raw_message = {"role": "assistant", "tool_calls": [
-            {"id": "call_1", "type": "function", "function": {"name": "check_budget", "arguments": "{}"}}
-        ]}
+        first_response.raw_message = {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "check_budget", "arguments": "{}"}}
+            ],
+        }
 
         second_response = MagicMock()
         second_response.tool_calls = []
@@ -155,8 +178,12 @@ class TestExecuteActionWithToolCalls:
         mock_llm.complete_with_tools.side_effect = [first_response, second_response]
 
         result = execute_action(
-            task="Check the budget", agent_name="gandalf", decision="monitor",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            task="Check the budget",
+            agent_name="gandalf",
+            decision="monitor",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
         assert "$" in result.summary
         assert mock_llm.complete_with_tools.call_count == 2
@@ -168,22 +195,33 @@ class TestExecuteActionWithToolCalls:
         tool_call = MagicMock()
         tool_call.id = "call_1"
         tool_call.function.name = "write_memory"
-        tool_call.function.arguments = json.dumps({
-            "path": "shared/decisions/test.md",
-            "content": "We decided to explore.",
-        })
+        tool_call.function.arguments = json.dumps(
+            {
+                "path": "shared/decisions/test.md",
+                "content": "We decided to explore.",
+            }
+        )
 
         first_response = MagicMock()
         first_response.tool_calls = [tool_call]
         first_response.text = ""
         first_response.input_tokens = 100
         first_response.output_tokens = 50
-        first_response.raw_message = {"role": "assistant", "tool_calls": [
-            {"id": "call_1", "type": "function", "function": {
-                "name": "write_memory",
-                "arguments": json.dumps({"path": "shared/decisions/test.md", "content": "We decided to explore."})
-            }}
-        ]}
+        first_response.raw_message = {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "write_memory",
+                        "arguments": json.dumps(
+                            {"path": "shared/decisions/test.md", "content": "We decided to explore."}
+                        ),
+                    },
+                }
+            ],
+        }
 
         second_response = MagicMock()
         second_response.tool_calls = []
@@ -194,8 +232,12 @@ class TestExecuteActionWithToolCalls:
         mock_llm.complete_with_tools.side_effect = [first_response, second_response]
 
         execute_action(
-            task="Write a decision", agent_name="gandalf", decision="document",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            task="Write a decision",
+            agent_name="gandalf",
+            decision="document",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
         assert (tool_ctx.memory_root / "shared" / "decisions" / "test.md").read_text() == "We decided to explore."
 
@@ -213,15 +255,23 @@ class TestExecuteActionWithToolCalls:
         response.text = ""
         response.input_tokens = 100
         response.output_tokens = 50
-        response.raw_message = {"role": "assistant", "tool_calls": [
-            {"id": "call_n", "type": "function", "function": {"name": "check_budget", "arguments": "{}"}}
-        ]}
+        response.raw_message = {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "call_n", "type": "function", "function": {"name": "check_budget", "arguments": "{}"}}
+            ],
+        }
 
         mock_llm.complete_with_tools.return_value = response
 
         result = execute_action(
-            task="Check budget forever", agent_name="gandalf", decision="monitor",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model", max_rounds=3,
+            task="Check budget forever",
+            agent_name="gandalf",
+            decision="monitor",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
+            max_rounds=3,
         )
         assert mock_llm.complete_with_tools.call_count == 3
         assert "max rounds" in result.summary.lower()
@@ -233,8 +283,12 @@ class TestExecuteActionLLMFailure:
         mock_llm.complete_with_tools.side_effect = Exception("API down")
 
         result = execute_action(
-            task="Do something", agent_name="gandalf", decision="act",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            task="Do something",
+            agent_name="gandalf",
+            decision="act",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
         assert "error" in result.summary.lower()
         assert "API down" in result.summary
@@ -252,9 +306,13 @@ class TestExecuteActionDeliverable:
         mock_llm.complete_with_tools.return_value = response
 
         execute_action(
-            task="Research models", agent_name="gandalf", decision="explore",
+            task="Research models",
+            agent_name="gandalf",
+            decision="explore",
             deliverable="Write findings to memory/gandalf/cycle_notes.md",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
 
         call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
@@ -273,9 +331,13 @@ class TestExecuteActionDeliverable:
         mock_llm.complete_with_tools.return_value = response
 
         execute_action(
-            task="Research models", agent_name="gandalf", decision="explore",
+            task="Research models",
+            agent_name="gandalf",
+            decision="explore",
             deliverable="notes about models",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
 
         call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
@@ -290,6 +352,7 @@ class TestExecuteActionMaxRounds:
         """DEFAULT_MAX_ROUNDS is a bug guard only — budget is the real governor.
         Set high so agents can complete multi-step tasks without hitting an artificial wall."""
         from brain.executor import DEFAULT_MAX_ROUNDS
+
         assert DEFAULT_MAX_ROUNDS == 50
 
 
@@ -310,8 +373,12 @@ class TestExecuteActionPromptUrgency:
         mock_llm.complete_with_tools.return_value = response
 
         execute_action(
-            task="Build something", agent_name="gimli", decision="build",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            task="Build something",
+            agent_name="gimli",
+            decision="build",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
         call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
         return next(m["content"] for m in call_messages if m["role"] == "system")
@@ -344,8 +411,12 @@ class TestExecuteActionPromptUrgency:
         mock_llm.complete_with_tools.return_value = response
 
         execute_action(
-            task="Build something", agent_name="gimli", decision="build",
-            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+            task="Build something",
+            agent_name="gimli",
+            decision="build",
+            llm=mock_llm,
+            tool_ctx=tool_ctx,
+            model="test/model",
         )
         call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
         user_msg = next(m["content"] for m in call_messages if m["role"] == "user")

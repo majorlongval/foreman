@@ -30,9 +30,7 @@ class MemoryStore:
     def _check_access(self, owner: str, operation: str) -> Path:
         """Validate access and return the resolved directory path."""
         if owner != self._agent_name and owner != "shared":
-            raise PermissionError(
-                f"{self._agent_name} cannot {operation} {owner}'s memory"
-            )
+            raise PermissionError(f"{self._agent_name} cannot {operation} {owner}'s memory")
         return self._root / owner
 
     def write(self, owner: str, filename: str, content: str) -> None:
@@ -51,16 +49,10 @@ class MemoryStore:
             return None
         return target.read_text()
 
-    def list_files(
-        self, owner: str, subdirectory: str = ""
-    ) -> List[str]:
+    def list_files(self, owner: str, subdirectory: str = "") -> List[str]:
         """List .md files in a memory directory."""
         base = self._check_access(owner, "list")
         search_dir = base / subdirectory if subdirectory else base
         if not search_dir.exists():
             return []
-        return sorted(
-            f.name
-            for f in search_dir.iterdir()
-            if f.is_file() and f.suffix == ".md"
-        )
+        return sorted(f.name for f in search_dir.iterdir() if f.is_file() and f.suffix == ".md")

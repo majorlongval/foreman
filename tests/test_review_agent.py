@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 # Ensure project root is in path for imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Setup logging
 logging.basicConfig(
@@ -14,6 +14,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("test-review-agent")
+
 
 class TestReviewAgentTestPresence(unittest.TestCase):
     """
@@ -26,11 +27,14 @@ class TestReviewAgentTestPresence(unittest.TestCase):
         Initialize PRReviewer with mocked dependencies.
         """
         try:
-            with patch('review_agent.Github'), \
-                 patch('review_agent.LLMClient'), \
-                 patch('review_agent.ModelRouter'), \
-                 patch('review_agent.CostTracker'):
+            with (
+                patch("review_agent.Github"),
+                patch("review_agent.LLMClient"),
+                patch("review_agent.ModelRouter"),
+                patch("review_agent.CostTracker"),
+            ):
                 from review_agent import PRReviewer
+
                 self.reviewer = PRReviewer("fake-token", "owner/repo", dry_run=True)
         except Exception as e:
             log.error(f"Failed to set up TestReviewAgentTestPresence: {e}")
@@ -45,17 +49,10 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             pr = MagicMock()
             pr.labels = []
             pr.body = "Updated the project configuration and documentation."
-            
+
             # List of files that should trigger exemption
-            files = [
-                "README.md", 
-                "requirements.txt", 
-                "package.json", 
-                "config.toml", 
-                "deploy.yml",
-                "settings.json"
-            ]
-            
+            files = ["README.md", "requirements.txt", "package.json", "config.toml", "deploy.yml", "settings.json"]
+
             result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNone(result, "PR with only config/docs should not be flagged.")
             log.info("✅ test_validate_test_presence_config_only passed")
@@ -72,10 +69,10 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             pr = MagicMock()
             pr.labels = []
             pr.body = "Refactored core logic to improve performance."
-            
+
             # Modifying source code but no test files
             files = ["core/engine.py", "utils/helper.py"]
-            
+
             result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNotNone(result, "PR modifying source without tests should be flagged.")
             self.assertIn("[CRITICAL]", result)
@@ -94,10 +91,10 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             pr = MagicMock()
             pr.labels = []
             pr.body = "Added new feature and unit tests. Ready for review."
-            
+
             # Source and test file both present
             files = ["feature.py", "tests/test_feature.py"]
-            
+
             result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNotNone(result, "PR with tests but no execution evidence should be flagged.")
             self.assertIn("[IMPORTANT]", result)
@@ -123,10 +120,10 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             ======= 12 passed, 2 skipped in 4.56s =======
             ```
             """
-            
+
             # Supports both tests/test_*.py and test_*.py
             files = ["logic.py", "test_logic.py"]
-            
+
             result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNone(result, "Valid PR with tests and evidence should not be flagged.")
             log.info("✅ test_validate_test_presence_valid passed")
@@ -140,16 +137,16 @@ class TestReviewAgentTestPresence(unittest.TestCase):
         """
         try:
             log.info("Starting test_validate_test_presence_skip_review")
-            
+
             pr = MagicMock()
             label = MagicMock()
             label.name = "skip-review"
             pr.labels = [label]
             pr.body = "Urgent fix for production outage."
-            
+
             # Even though source is modified without tests, skip-review label should override
             files = ["agent_loop.py"]
-            
+
             result = self.reviewer._validate_test_presence(pr, files)
             self.assertIsNone(result, "PRs with skip-review label should be exempted from checks.")
             log.info("✅ test_validate_test_presence_skip_review passed")
@@ -157,7 +154,7 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             log.error(f"test_validate_test_presence_skip_review failed: {e}")
             raise
 
-    # CRITICAL TODO: You must implement the logic in review_agent.py to call pr.create_review() 
+    # CRITICAL TODO: You must implement the logic in review_agent.py to call pr.create_review()
     # and handle idempotency before these tests will pass.
     def test_preflight_submits_formal_review(self):
         """
@@ -170,26 +167,26 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             pr.labels = []
             pr.body = "Logic change without tests."
             pr.head.sha = "commit123"
-            
+
             # Setup files: source present, no tests
             f1 = MagicMock()
             f1.filename = "src/logic.py"
             f1.patch = "diff content"
             pr.get_files.return_value = [f1]
-            
+
             # No prior reviews
             pr.get_reviews.return_value = []
-            
+
             # Execute
             self.reviewer.dry_run = False
             self.reviewer.review_pr(pr)
-            
+
             # Assertions
             pr.create_review.assert_called_once()
             _, kwargs = pr.create_review.call_args
-            self.assertEqual(kwargs['event'], "REQUEST_CHANGES")
-            self.assertIn("Review by FOREMAN", kwargs['body'])
-            self.assertIn("[CRITICAL]", kwargs['body'])
+            self.assertEqual(kwargs["event"], "REQUEST_CHANGES")
+            self.assertIn("Review by FOREMAN", kwargs["body"])
+            self.assertIn("[CRITICAL]", kwargs["body"])
             log.info("✅ test_preflight_submits_formal_review passed")
         except Exception as e:
             log.error(f"test_preflight_submits_formal_review failed: {e}")
@@ -204,7 +201,7 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             pr = MagicMock()
             pr.number = 89
             pr.head.sha = "commit123"
-            
+
             # Mock an existing review for this commit
             existing_review = MagicMock()
             # Must contain BOT_SIGNATURE.strip() which is "_Review by FOREMAN 🤖_"
@@ -212,17 +209,18 @@ class TestReviewAgentTestPresence(unittest.TestCase):
             existing_review.commit_id = "commit123"
             existing_review.state = "CHANGES_REQUESTED"
             pr.get_reviews.return_value = [existing_review]
-            
+
             # Execute
             self.reviewer.dry_run = False
             self.reviewer.review_pr(pr)
-            
+
             # Assertions: Should skip before even checking files or creating review
             pr.create_review.assert_not_called()
             log.info("✅ test_preflight_skips_if_review_exists passed")
         except Exception as e:
             log.error(f"test_preflight_skips_if_review_exists failed: {e}")
             raise
+
 
 if __name__ == "__main__":
     try:

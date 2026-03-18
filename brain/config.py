@@ -52,10 +52,7 @@ class Config:
         comm = data.get("communication", {})
 
         agents_data = data.get("agents", {})
-        agents = [
-            AgentConfig.from_dict(name, agent_data)
-            for name, agent_data in agents_data.items()
-        ]
+        agents = [AgentConfig.from_dict(name, agent_data) for name, agent_data in agents_data.items()]
 
         return cls(
             daily_limit_usd=budget.get("daily_limit_usd", 5.00),

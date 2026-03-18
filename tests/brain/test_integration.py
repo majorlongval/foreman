@@ -17,8 +17,7 @@ def full_env(tmp_path: Path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     memory_root = tmp_path / "memory"
-    for d in ["shared/costs", "shared/decisions", "shared/journal",
-              "shared/incidents", "gandalf", "gimli"]:
+    for d in ["shared/costs", "shared/decisions", "shared/journal", "shared/incidents", "gandalf", "gimli"]:
         (memory_root / d).mkdir(parents=True)
 
     (repo_root / "PHILOSOPHY.md").write_text("Be good. Grow. Be efficient.")
@@ -103,9 +102,7 @@ class TestFullCycle:
         # Spend all the budget
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         costs_dir = full_env["memory_root"] / "shared" / "costs"
-        (costs_dir / f"{today}.jsonl").write_text(
-            json.dumps({"cost_usd": 10.0}) + "\n"
-        )
+        (costs_dir / f"{today}.jsonl").write_text(json.dumps({"cost_usd": 10.0}) + "\n")
         outcome = run_cycle(
             config=full_env["config"],
             repo=full_env["mock_repo"],

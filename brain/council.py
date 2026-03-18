@@ -90,17 +90,20 @@ ELROND_USER = """{survey_context}
 
 # ── Pydantic response models ─────────────────────────────────
 
+
 class AgentResponse(BaseModel):
     """Expected JSON from an agent's deliberation call (kept for backwards compatibility)."""
+
     perspective: str
     proposed_action: str
 
 
 class AgentAssignment(BaseModel):
     """One agent's assignment within a phase."""
-    agent: str       # agent name matching config
-    task: str        # specific work to do this cycle
-    deliverable: str # concrete artifact: file written, issue created, PR opened, etc.
+
+    agent: str  # agent name matching config
+    task: str  # specific work to do this cycle
+    deliverable: str  # concrete artifact: file written, issue created, PR opened, etc.
 
 
 class ChairResponse(BaseModel):
@@ -109,6 +112,7 @@ class ChairResponse(BaseModel):
     phases is a list of phases, each phase is a list of assignments.
     Phases execute in order; assignments within a phase run independently.
     """
+
     decision: str
     action_plan: str
     phases: List[List[AgentAssignment]] = []
@@ -118,8 +122,10 @@ class ChairResponse(BaseModel):
 
 # ── Protocols ─────────────────────────────────────────────────
 
+
 class LLMResponseLike(Protocol):
     """Minimal interface for LLM response objects."""
+
     text: str
     input_tokens: int
     output_tokens: int
@@ -127,17 +133,24 @@ class LLMResponseLike(Protocol):
 
 class LLMPort(Protocol):
     """Interface for LLM calls — keeps council decoupled from provider."""
+
     def complete(
-        self, model: str, system: str, message: str, max_tokens: Optional[int] = None,
+        self,
+        model: str,
+        system: str,
+        message: str,
+        max_tokens: Optional[int] = None,
         response_format: Optional[type] = None,
     ) -> LLMResponseLike: ...
 
 
 # ── Domain types ──────────────────────────────────────────────
 
+
 @dataclass
 class AgentPerspective:
     """One agent's response during deliberation (kept for backwards compatibility — no longer used)."""
+
     agent_name: str
     perspective: str
     proposed_action: str
@@ -146,6 +159,7 @@ class AgentPerspective:
 @dataclass
 class CouncilResult:
     """Outcome of one Elrond orchestration cycle."""
+
     # perspectives is always [] — deliberation is gone, kept for interface stability
     perspectives: List[AgentPerspective]
     chair_name: str  # always "elrond"
@@ -158,6 +172,7 @@ class CouncilResult:
 
 
 # ── Main entry point ──────────────────────────────────────────
+
 
 def run_council(
     config: Config,
@@ -224,6 +239,7 @@ def run_council(
 
 # ── Prompt builder ────────────────────────────────────────────
 
+
 def build_elrond_prompt(
     worker_agents: List[AgentConfig],
     survey_context: str,
@@ -281,6 +297,7 @@ def build_elrond_prompt(
 
 # ── Response parsing ──────────────────────────────────────────
 
+
 def extract_json(text: str) -> str:
     """Extract a JSON object string from LLM output.
 
@@ -297,7 +314,7 @@ def extract_json(text: str) -> str:
     first = stripped.find("{")
     last = stripped.rfind("}")
     if first != -1 and last > first:
-        return stripped[first:last + 1]
+        return stripped[first : last + 1]
 
     return stripped
 

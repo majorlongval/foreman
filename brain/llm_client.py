@@ -41,14 +41,16 @@ log = logging.getLogger("foreman.llm")
 
 # LiteLLM configuration
 litellm.telemetry = False
-litellm.drop_params = True # Silently drop unsupported params like thinking_config
+litellm.drop_params = True  # Silently drop unsupported params like thinking_config
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 # ─── Response ────────────────────────────────────────────────
 
+
 @dataclass
 class LLMResponse:
     """Unified response from any LLM provider."""
+
     text: str
     input_tokens: int
     output_tokens: int
@@ -57,6 +59,7 @@ class LLMResponse:
 @dataclass
 class ToolCallInfo:
     """One tool call from an LLM response."""
+
     id: str
     function: "ToolCallFunction"
 
@@ -64,6 +67,7 @@ class ToolCallInfo:
 @dataclass
 class ToolCallFunction:
     """Function details within a tool call."""
+
     name: str
     arguments: str
 
@@ -71,6 +75,7 @@ class ToolCallFunction:
 @dataclass
 class LLMToolResponse:
     """Response from an LLM call that may include tool calls."""
+
     text: str
     input_tokens: int
     output_tokens: int
@@ -83,46 +88,43 @@ class LLMToolResponse:
 # Per 1M tokens: (input, output)
 PRICING = {
     # Anthropic (bare keys for callers that pass model name without provider prefix)
-    "claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
-    "claude-opus-4-6":           {"input": 15.0, "output": 75.0},
-    "anthropic/claude-sonnet-4-6":         {"input": 3.0,  "output": 15.0},
+    "claude-opus-4-6": {"input": 15.0, "output": 75.0},
+    "anthropic/claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
     "anthropic/claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0},
-    "anthropic/claude-opus-4-6":           {"input": 15.0, "output": 75.0},
+    "anthropic/claude-opus-4-6": {"input": 15.0, "output": 75.0},
     # Gemini
-    "gemini/gemini-2.5-pro":               {"input": 1.25, "output": 10.0},
-    "gemini/gemini-2.5-flash":             {"input": 0.15, "output": 0.60},
-    "gemini/gemini-2.5-flash-lite":        {"input": 0.075, "output": 0.30},
-    "gemini/gemini-3.1-pro-preview":       {"input": 1.25, "output": 10.0},
-    "gemini/gemini-3-flash-preview":       {"input": 0.15, "output": 0.60},
-    "gemini/gemini-3.1-flash-lite-preview":{"input": 0.075, "output": 0.30},
-
+    "gemini/gemini-2.5-pro": {"input": 1.25, "output": 10.0},
+    "gemini/gemini-2.5-flash": {"input": 0.15, "output": 0.60},
+    "gemini/gemini-2.5-flash-lite": {"input": 0.075, "output": 0.30},
+    "gemini/gemini-3.1-pro-preview": {"input": 1.25, "output": 10.0},
+    "gemini/gemini-3-flash-preview": {"input": 0.15, "output": 0.60},
+    "gemini/gemini-3.1-flash-lite-preview": {"input": 0.075, "output": 0.30},
     # Embedding models
-    "gemini/text-embedding-004":           {"input": 0.0, "output": 0.0}, 
-
+    "gemini/text-embedding-004": {"input": 0.0, "output": 0.0},
     # OpenAI
-    "openai/gpt-4o":                       {"input": 2.50, "output": 10.0},
-    "openai/gpt-4o-mini":                  {"input": 0.15, "output": 0.60},
-    "openai/o3-mini":                      {"input": 1.10, "output": 4.40},
-    "openai/text-embedding-3-small":       {"input": 0.02, "output": 0.0},
-    "openai/text-embedding-3-large":       {"input": 0.13, "output": 0.0},
-
+    "openai/gpt-4o": {"input": 2.50, "output": 10.0},
+    "openai/gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "openai/o3-mini": {"input": 1.10, "output": 4.40},
+    "openai/text-embedding-3-small": {"input": 0.02, "output": 0.0},
+    "openai/text-embedding-3-large": {"input": 0.13, "output": 0.0},
     # Groq
-    "groq/llama-3.3-70b-versatile":        {"input": 0.59, "output": 0.79},
-    "groq/gemma2-9b-it":                   {"input": 0.20, "output": 0.20},
-
+    "groq/llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79},
+    "groq/gemma2-9b-it": {"input": 0.20, "output": 0.20},
     # Local models (free)
-    "ollama/any":                          {"input": 0.0, "output": 0.0},
+    "ollama/any": {"input": 0.0, "output": 0.0},
 }
+
 
 def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> float:
     """Estimate cost in USD for a completion."""
     pricing = PRICING.get(model_key)
-    
+
     # Fallback to check without provider prefix
     if not pricing and "/" in model_key:
         pricing = PRICING.get(model_key.split("/", 1)[1])
-        
+
     if not pricing:
         provider = model_key.split("/")[0]
         if provider in ("ollama", "lmstudio", "local"):
@@ -133,6 +135,7 @@ def estimate_cost(model_key: str, input_tokens: int, output_tokens: int) -> floa
 
 
 # ─── Unified Client ──────────────────────────────────────────
+
 
 class LLMClient:
     """Provider-agnostic LLM client using LiteLLM.
@@ -178,12 +181,12 @@ class LLMClient:
                 kwargs["api_base"] = self._ollama_base
 
             log.info(f"  🤖 {model}" + (f" (max {max_tokens} tokens)" if max_tokens else ""))
-            
+
             response = litellm.completion(**kwargs)
             if not getattr(response, "choices", None):
                 raise ValueError(f"LLM API returned no choices (possibly blocked). Raw response: {response}")
             text = response.choices[0].message.content or ""
-            
+
             usage = getattr(response, "usage", None)
             input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
             output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
@@ -272,8 +275,10 @@ class LLMClient:
             input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
             output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
             cost = estimate_cost(model, input_tokens, output_tokens)
-            log.info(f"  ✓ {input_tokens} in / {output_tokens} out = ${cost:.4f}"
-                     + (f" ({len(tool_calls)} tool calls)" if tool_calls else ""))
+            log.info(
+                f"  ✓ {input_tokens} in / {output_tokens} out = ${cost:.4f}"
+                + (f" ({len(tool_calls)} tool calls)" if tool_calls else "")
+            )
 
             return LLMToolResponse(
                 text=text,
@@ -291,22 +296,19 @@ class LLMClient:
         try:
             if not model:
                 model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
-            
-            kwargs = {
-                "model": model,
-                "input": [text]
-            }
-            
+
+            kwargs = {"model": model, "input": [text]}
+
             if model.startswith("ollama/"):
                 kwargs["api_base"] = self._ollama_base
             response = litellm.embedding(**kwargs)
             if not getattr(response, "data", None):
                 raise ValueError(f"LLM API returned no embedding data (possibly blocked). Raw response: {response}")
-            
+
             usage = getattr(response, "usage", None)
             input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
             cost = estimate_cost(model, input_tokens, 0)
-            
+
             log.info(f"  ✓ embedding {input_tokens} tokens = ${cost:.4f}")
             return response.data[0].embedding
         except Exception as e:

@@ -114,10 +114,7 @@ def gather_survey(
             key = f"PR #{pr.number}: {pr.title}"
             open_prs.append(key)
             try:
-                comments = [
-                    f"{c.user.login}: {c.body}"
-                    for c in pr.get_issue_comments()
-                ]
+                comments = [f"{c.user.login}: {c.body}" for c in pr.get_issue_comments()]
                 if comments:
                     pr_comments[key] = comments
             except Exception as e:

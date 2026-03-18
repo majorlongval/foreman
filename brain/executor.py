@@ -28,6 +28,7 @@ DEFAULT_MAX_ROUNDS = 50
 @dataclass
 class ExecutionResult:
     """Result of one agent executing their assigned task."""
+
     summary: str
     cost_usd: float = 0.0
 
@@ -98,7 +99,8 @@ def execute_action(
         f"You MUST produce: {deliverable}\n\n"
         f"After completing your task, use write_memory to save a brief note about "
         f"what you did to memory/{agent_name}/cycle_notes.md."
-        if deliverable else ""
+        if deliverable
+        else ""
     )
 
     user = (
@@ -109,9 +111,7 @@ def execute_action(
         f"memory/ — shared/ for journal/costs/decisions, per-agent dirs for private notes\n"
         f"PHILOSOPHY.md — constitution, INBOX.md — notes from Jord\n\n"
         f"## Council Decision\n{decision}\n\n"
-        f"## Your Task\n{task}"
-        + deliverable_section
-        + "\n\nExecute your task using the available tools."
+        f"## Your Task\n{task}" + deliverable_section + "\n\nExecute your task using the available tools."
     )
 
     messages = [
@@ -137,14 +137,16 @@ def execute_action(
                 # actually calling create_issue — promising the deliverable instead of producing it.
                 if not actions_taken:
                     messages.append({"role": "assistant", "content": response.text or ""})
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "You have not used any tool yet. "
-                            "You must use at least one tool to produce your deliverable. "
-                            "Please proceed with a tool call now."
-                        ),
-                    })
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "You have not used any tool yet. "
+                                "You must use at least one tool to produce your deliverable. "
+                                "Please proceed with a tool call now."
+                            ),
+                        }
+                    )
                     continue
                 summary = response.text or _summarize_actions(actions_taken)
                 return ExecutionResult(summary=summary, cost_usd=total_cost)
@@ -163,11 +165,13 @@ def execute_action(
                 result = execute_tool(name, args, tool_ctx)
                 actions_taken.append(f"{name}: {result[:100]}")
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result,
+                    }
+                )
 
         log.warning(f"Executor hit max rounds ({max_rounds}) for {agent_name}")
         summary = f"Reached max rounds ({max_rounds}). " + _summarize_actions(actions_taken)

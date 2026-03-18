@@ -1,5 +1,6 @@
 # tests/test_fix_patches.py
 """Tests for fix_agent patch helper functions."""
+
 import os
 import sys
 

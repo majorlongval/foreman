@@ -34,9 +34,15 @@ class TestToolSchemas:
     def test_expected_tools_present(self) -> None:
         names = {s["name"] for s in TOOL_SCHEMAS}
         expected = {
-            "read_file", "create_issue", "create_pr",
-            "read_memory", "write_memory", "send_telegram",
-            "check_budget", "list_issues", "list_prs",
+            "read_file",
+            "create_issue",
+            "create_pr",
+            "read_memory",
+            "write_memory",
+            "send_telegram",
+            "check_budget",
+            "list_issues",
+            "list_prs",
         }
         assert expected.issubset(names)
 
@@ -255,17 +261,13 @@ class TestPostCommentTool:
     def test_posts_comment_on_pr(self, tool_context: ToolContext) -> None:
         mock_pr = MagicMock()
         tool_context.repo.get_pull.return_value = mock_pr
-        result = execute_tool(
-            "post_comment", {"pr_number": 42, "body": "LGTM, but add tests."}, tool_context
-        )
+        result = execute_tool("post_comment", {"pr_number": 42, "body": "LGTM, but add tests."}, tool_context)
         mock_pr.create_issue_comment.assert_called_once_with("LGTM, but add tests.")
         assert "comment" in result.lower()
 
     def test_handles_api_error(self, tool_context: ToolContext) -> None:
         tool_context.repo.get_pull.side_effect = Exception("API error")
-        result = execute_tool(
-            "post_comment", {"pr_number": 42, "body": "looks good"}, tool_context
-        )
+        result = execute_tool("post_comment", {"pr_number": 42, "body": "looks good"}, tool_context)
         assert "error" in result.lower()
 
 

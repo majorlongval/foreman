@@ -86,29 +86,34 @@ class TestCouncilResult:
 class TestParseJsonResponse:
     def test_plain_json(self) -> None:
         from brain.council import parse_json_response
+
         result = parse_json_response('{"perspective": "test", "proposed_action": "do X"}')
         assert result["perspective"] == "test"
 
     def test_markdown_fenced_json(self) -> None:
         from brain.council import parse_json_response
+
         text = '```json\n{"perspective": "test"}\n```'
         result = parse_json_response(text)
         assert result["perspective"] == "test"
 
     def test_markdown_fenced_no_lang(self) -> None:
         from brain.council import parse_json_response
+
         text = '```\n{"perspective": "test"}\n```'
         result = parse_json_response(text)
         assert result["perspective"] == "test"
 
     def test_text_before_json(self) -> None:
         from brain.council import parse_json_response
+
         text = 'Here is my analysis:\n{"perspective": "test", "proposed_action": "do X"}'
         result = parse_json_response(text)
         assert result["perspective"] == "test"
 
     def test_text_surrounding_json(self) -> None:
         from brain.council import parse_json_response
+
         text = 'Let me think...\n{"decision": "build", "action_plan": "step 1"}\nDone!'
         result = parse_json_response(text)
         assert result["decision"] == "build"
@@ -117,17 +122,20 @@ class TestParseJsonResponse:
         import json
 
         from brain.council import parse_json_response
+
         with pytest.raises(json.JSONDecodeError):
             parse_json_response("not json at all")
 
     def test_trailing_comma_in_object(self) -> None:
         from brain.council import parse_json_response
+
         text = '{"decision": "build", "action_plan": "step 1",}'
         result = parse_json_response(text)
         assert result["decision"] == "build"
 
     def test_trailing_comma_in_assignments(self) -> None:
         from brain.council import parse_json_response
+
         text = '{"assignments": {"gandalf": "task A", "gimli": "task B",}}'
         result = parse_json_response(text)
         assert result["assignments"]["gandalf"] == "task A"
@@ -135,6 +143,7 @@ class TestParseJsonResponse:
     def test_unquoted_keys(self) -> None:
         """Gemini Flash sometimes emits unquoted keys in nested objects — must be fixed."""
         from brain.council import parse_json_response
+
         text = '{decision: "build it", action_plan: "step 1", flag_for_jord: false, flag_reason: ""}'
         result = parse_json_response(text)
         assert result["decision"] == "build it"
@@ -142,18 +151,21 @@ class TestParseJsonResponse:
 
     def test_python_boolean_true(self) -> None:
         from brain.council import parse_json_response
+
         text = '{"flag_for_jord": True, "flag_reason": "risky"}'
         result = parse_json_response(text)
         assert result["flag_for_jord"] is True
 
     def test_python_boolean_false(self) -> None:
         from brain.council import parse_json_response
+
         text = '{"flag_for_jord": False, "flag_reason": ""}'
         result = parse_json_response(text)
         assert result["flag_for_jord"] is False
 
     def test_python_none(self) -> None:
         from brain.council import parse_json_response
+
         text = '{"decision": "build", "flag_reason": None}'
         result = parse_json_response(text)
         assert result["flag_reason"] is None
@@ -162,6 +174,7 @@ class TestParseJsonResponse:
 class TestPydanticValidation:
     def testparse_agent_response(self) -> None:
         from brain.council import parse_agent_response
+
         text = '{"perspective": "We should explore", "proposed_action": "Research"}'
         result = parse_agent_response(text)
         assert result.perspective == "We should explore"
@@ -169,6 +182,7 @@ class TestPydanticValidation:
 
     def testparse_chair_response(self) -> None:
         from brain.council import parse_chair_response
+
         text = '{"decision": "build it", "action_plan": "step 1"}'
         result = parse_chair_response(text)
         assert result.decision == "build it"
@@ -176,6 +190,7 @@ class TestPydanticValidation:
 
     def test_parse_chair_response_with_flag(self) -> None:
         from brain.council import parse_chair_response
+
         text = '{"decision": "risky", "action_plan": "", "flag_for_jord": true, "flag_reason": "disagreement"}'
         result = parse_chair_response(text)
         assert result.flag_for_jord is True
@@ -185,12 +200,14 @@ class TestPydanticValidation:
         from pydantic import ValidationError
 
         from brain.council import parse_agent_response
+
         with pytest.raises(ValidationError):
             parse_agent_response('{"perspective": "test"}')
 
     def test_chair_response_parses_phases(self) -> None:
         """ChairResponse must parse phases as List[List[AgentAssignment]]."""
         from brain.council import parse_chair_response
+
         text = (
             '{"decision": "build it", "action_plan": "step 1",'
             '"phases": [[{"agent": "gandalf", "task": "scout the repo", "deliverable": "memory/gandalf/cycle_notes.md"},'  # noqa: E501
@@ -227,10 +244,14 @@ class TestRunCouncil:
         config = make_config(agents)
 
         run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="Be good.", identity_texts={a.name: f"You are {a.name}" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="Be good.",
+            identity_texts={a.name: f"You are {a.name}" for a in agents},
             memory_summaries={a.name: "" for a in agents},
-            shared_memory_summary="", llm=mock_llm,
+            shared_memory_summary="",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
         assert mock_llm.complete.call_count == 1
@@ -240,16 +261,26 @@ class TestRunCouncil:
         agents = make_agents()
         mock_llm = self._make_mock_llm(_ELROND_PHASES_4)
         config = Config(
-            daily_limit_usd=5.0, model_default="test", model_reasoning="test",
-            model_council="should-not-be-used", model_elrond="gemini/gemini-3-pro-preview",
-            agents=agents, council_enabled=True, max_cycles_per_day=12, telegram_enabled=True,
+            daily_limit_usd=5.0,
+            model_default="test",
+            model_reasoning="test",
+            model_council="should-not-be-used",
+            model_elrond="gemini/gemini-3-pro-preview",
+            agents=agents,
+            council_enabled=True,
+            max_cycles_per_day=12,
+            telegram_enabled=True,
         )
 
         run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={a.name: "" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="",
+            identity_texts={a.name: "" for a in agents},
             memory_summaries={a.name: "" for a in agents},
-            shared_memory_summary="", llm=mock_llm,
+            shared_memory_summary="",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
         call_kwargs = mock_llm.complete.call_args.kwargs
@@ -262,10 +293,14 @@ class TestRunCouncil:
         config = make_config(agents)
 
         result = run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={a.name: "" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="",
+            identity_texts={a.name: "" for a in agents},
             memory_summaries={a.name: "" for a in agents},
-            shared_memory_summary="", llm=mock_llm,
+            shared_memory_summary="",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
         assert len(result.phases) == 1
@@ -280,10 +315,14 @@ class TestRunCouncil:
         config = make_config(agents)
 
         result = run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={a.name: "" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="",
+            identity_texts={a.name: "" for a in agents},
             memory_summaries={a.name: "" for a in agents},
-            shared_memory_summary="", llm=mock_llm,
+            shared_memory_summary="",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
         assert result.chair_name == "elrond"
@@ -295,10 +334,14 @@ class TestRunCouncil:
         config = make_config(agents)
 
         result = run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={a.name: "" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="",
+            identity_texts={a.name: "" for a in agents},
             memory_summaries={a.name: "" for a in agents},
-            shared_memory_summary="", llm=mock_llm,
+            shared_memory_summary="",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
         assert result.perspectives == []
@@ -308,16 +351,26 @@ class TestRunCouncil:
         agents = make_agents()
         mock_llm = self._make_mock_llm(_ELROND_PHASES_4)
         config = Config(
-            daily_limit_usd=5.0, model_default="test", model_reasoning="test",
-            model_council="test", model_elrond="gemini/gemini-3-flash-preview",
-            agents=agents, council_enabled=True, max_cycles_per_day=12, telegram_enabled=True,
+            daily_limit_usd=5.0,
+            model_default="test",
+            model_reasoning="test",
+            model_council="test",
+            model_elrond="gemini/gemini-3-flash-preview",
+            agents=agents,
+            council_enabled=True,
+            max_cycles_per_day=12,
+            telegram_enabled=True,
         )
 
         result = run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={a.name: "" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="",
+            identity_texts={a.name: "" for a in agents},
             memory_summaries={a.name: "" for a in agents},
-            shared_memory_summary="", llm=mock_llm,
+            shared_memory_summary="",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
         # 100 input / 50 output tokens with a real model should produce non-zero cost
@@ -348,10 +401,14 @@ class TestRunCouncil:
         config = make_config(agents)
 
         run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={a.name: "" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="",
+            identity_texts={a.name: "" for a in agents},
             memory_summaries=memory_summaries,
-            shared_memory_summary="shared stuff here", llm=mock_llm,
+            shared_memory_summary="shared stuff here",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
 
@@ -381,10 +438,14 @@ class TestRunCouncil:
         config = make_config(agents)
 
         run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={a.name: "" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="",
+            identity_texts={a.name: "" for a in agents},
             memory_summaries={a.name: "" for a in agents},
-            shared_memory_summary="", llm=mock_llm,
+            shared_memory_summary="",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
 
@@ -419,10 +480,14 @@ class TestRunCouncil:
         config = make_config(agents)
 
         run_council(
-            config=config, agents=agents, survey=make_survey(),
-            philosophy="", identity_texts={a.name: "" for a in agents},
+            config=config,
+            agents=agents,
+            survey=make_survey(),
+            philosophy="",
+            identity_texts={a.name: "" for a in agents},
             memory_summaries={a.name: "" for a in agents},
-            shared_memory_summary="", llm=mock_llm,
+            shared_memory_summary="",
+            llm=mock_llm,
             journal_dir=tmp_path / "journal",
         )
 
