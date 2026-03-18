@@ -3,11 +3,8 @@
 Focuses on deduplication and issue hygiene.
 """
 
-import logging
 import re
-from typing import Dict, List, Tuple
-
-log = logging.getLogger("foreman.brain.hygiene")
+from typing import Any, Dict, List, Tuple
 
 
 class Deduplicator:
@@ -18,7 +15,7 @@ class Deduplicator:
         threshold: float = 0.7,
         title_weight: float = 0.7,
         body_weight: float = 0.3,
-    ):
+    ) -> None:
         """Initialize the Deduplicator.
 
         Args:
@@ -60,8 +57,8 @@ class Deduplicator:
         return len(intersection) / len(union)
 
     def find_potential_duplicates(
-        self, issues: List[Dict]
-    ) -> List[Tuple[Dict, Dict, float]]:
+        self, issues: List[Dict[str, Any]]
+    ) -> List[Tuple[Dict[str, Any], Dict[str, Any], float]]:
         """Compare all open issues and find pairs above the similarity threshold."""
         duplicates = []
         for i in range(len(issues)):
@@ -76,9 +73,13 @@ class Deduplicator:
 
         return sorted(duplicates, key=lambda x: x[2], reverse=True)
 
-    def _get_combined_similarity(self, issue1: Dict, issue2: Dict) -> float:
+    def _get_combined_similarity(
+        self, issue1: Dict[str, Any], issue2: Dict[str, Any]
+    ) -> float:
         """Calculate weighted similarity between two issues."""
-        title_sim = self.calculate_similarity(issue1["title"], issue2["title"])
+        title1 = issue1.get("title", "") or ""
+        title2 = issue2.get("title", "") or ""
+        title_sim = self.calculate_similarity(title1, title2)
 
         body1 = issue1.get("body", "") or ""
         body2 = issue2.get("body", "") or ""
@@ -87,7 +88,9 @@ class Deduplicator:
         return (title_sim * self.title_weight) + (body_sim * self.body_weight)
 
 
-def format_duplication_report(duplicates: List[Tuple[Dict, Dict, float]]) -> str:
+def format_duplication_report(
+    duplicates: List[Tuple[Dict[str, Any], Dict[str, Any], float]]
+) -> str:
     """Format the list of potential duplicates into a readable report."""
     if not duplicates:
         return "No potential duplicates found."
