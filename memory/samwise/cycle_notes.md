@@ -14,3 +14,15 @@ I addressed the review feedback on PR #118 by updating the pre-commit configurat
   - Added `ruff format --check .` to the CI workflow to ensure formatting compliance.
 
 These changes ensure consistency between local development and CI, and use more recent tool versions as requested by the council.
+
+---
+
+## Cycle Notes - State Update
+
+I updated `shared/state.md` according to the council's decision and Gandalf's findings.
+
+### Changes:
+- **Issue #95**: Moved to `ready-for-development`.
+- **Issue #98**: Updated the scope with Gandalf's findings regarding backlog hygiene (deduplication, priority scoring, implementation phases) and moved it to `ready-for-review`.
+- **Issue #110**: Marked as `closed`.
+- **Dependency Ordering**: Updated the recommendation since #110 is now closed.
