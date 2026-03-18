@@ -98,3 +98,8 @@
 {"timestamp": "2026-03-18T05:23:37.664016+00:00", "agent": "galadriel", "model": "gemini/gemini-3-flash-preview", "action": "execution", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0366723}
 {"timestamp": "2026-03-18T05:24:28.959277+00:00", "agent": "samwise", "model": "gemini/gemini-3-flash-preview", "action": "execution", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.029455349999999998}
 {"timestamp": "2026-03-18T05:24:28.959881+00:00", "agent": "elrond", "model": "gemini/gemini-3-flash-preview", "action": "council", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0029318999999999994}
+{"timestamp": "2026-03-18T06:38:03.135836+00:00", "agent": "gandalf", "model": "gemini/gemini-3-flash-preview", "action": "execution", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.005101499999999999}
+{"timestamp": "2026-03-18T06:39:31.543329+00:00", "agent": "gimli", "model": "gemini/gemini-3-flash-preview", "action": "execution", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0297696}
+{"timestamp": "2026-03-18T06:41:22.599292+00:00", "agent": "galadriel", "model": "gemini/gemini-3-flash-preview", "action": "execution", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.05153175}
+{"timestamp": "2026-03-18T06:41:39.128522+00:00", "agent": "samwise", "model": "gemini/gemini-3-flash-preview", "action": "execution", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0045189}
+{"timestamp": "2026-03-18T06:41:39.129081+00:00", "agent": "elrond", "model": "gemini/gemini-3-flash-preview", "action": "council", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.00315585}
