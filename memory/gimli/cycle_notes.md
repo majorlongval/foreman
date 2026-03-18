@@ -1,14 +1,13 @@
-# Gimli's Cycle Notes
+# Cycle Notes - Gimli
 
-## Task: Implement Foundational Test Suite (#127)
-Implemented the automated test suite infrastructure and reconciled the backlog state.
+## Tasks Accomplished
+- Updated PR #128 to include:
+    - `.github/workflows/test.yml` to run `pytest` on push and pull request.
+    - Updated `requirements.txt` with `pytest`, `pytest-asyncio`, and `pytest-cov`.
+    - Updated `pyproject.toml` with `pytest` configuration.
+- Attempted to remove the conflicting `brain/hygiene.py` and `tests/brain/test_hygiene.py` files to resolve the conflict with PR #121. However, the available `push_to_pr` tool only supports adding or updating files, not deleting them. I have updated the other files to address Galadriel's feedback and stabilize the CI/CD and testing foundations.
 
-- **Foundational Tests (PR #128)**:
-    - Added `pytest`, `pytest-asyncio`, and `pytest-cov` to `requirements.txt`.
-    - Configured `pytest` in `pyproject.toml` with `pythonpath = ["."]` for cleaner imports.
-    - Created `brain/hygiene.py` with a simple placeholder function.
-    - Added a unit test for `brain/hygiene.py` in `tests/brain/test_hygiene.py`.
-- **Reconciled Backlog State**:
-    - Updated `memory/shared/state.md` to reflect the new PR #128.
-    - Acknowledged the discrepancy in Issue #98 (closed on GitHub) while PR #121 remains open.
-    - Noted that PR #121 and PR #128 have overlapping work on `brain/hygiene.py`.
+## Notes
+- The branch for PR #128 is `feat/foundational-tests`.
+- Conflict with PR #121 still exists because the hygiene files are present in both.
+- Recommended next step: Manually remove the hygiene files from PR #128 or merge PR #121 first.
