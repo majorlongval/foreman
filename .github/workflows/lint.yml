@@ -11,15 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: ruff
         uses: reviewdog/action-ruff@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Change reviewdog reporter if needed [github-pr-check, github-check, github-pr-review]
           reporter: github-pr-review
-          # Filter mode for reviewdog
           filter_mode: added
-          # Fail the job if issues are found
           fail_on_error: true
 
   type-check:
@@ -34,7 +35,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mypy
+          pip install mypy types-PyYAML
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: mypy
         uses: reviewdog/action-mypy@v0
@@ -43,5 +44,20 @@ jobs:
           reporter: github-pr-review
           filter_mode: added
           fail_on_error: true
-          # Optional: point to specific directory
-          # mypy_flags: "brain/"
+
+  test:
+    name: runner / pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Run tests
+        run: pytest
