@@ -2,7 +2,7 @@
 
 import itertools
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 from brain.loop import run_cycle, CycleOutcome
 from brain.config import Config, AgentConfig
@@ -533,7 +533,7 @@ class TestRunCycleCostPersistence:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         cost_file = cycle_env["memory_root"] / "shared" / "costs" / f"{today}.jsonl"
         assert cost_file.exists(), "Cost JSONL file should be written after a successful cycle"
-        lines = [l for l in cost_file.read_text().strip().split("\n") if l.strip()]
+        lines = [line for line in cost_file.read_text().strip().split("\n") if line.strip()]
         assert len(lines) >= 1
         entry = json.loads(lines[0])
         assert entry["cost_usd"] >= 0.0
@@ -550,7 +550,7 @@ class TestRunCycleSurveyFailure:
         mock_llm.complete.return_value = _make_elrond_resp()
         mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
-        outcome = run_cycle(
+        run_cycle(
             config=cycle_env["config"],
             repo=mock_repo,
             llm=mock_llm,

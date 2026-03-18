@@ -26,6 +26,13 @@
 - Private helper functions at the bottom.
 - If you need to test a function, it should be public (no `_` prefix).
 
+## Linting
+- Ruff is enforced in CI (line length 88, rules E/F/I). All PRs must pass.
+- Run before committing: `source .venv/bin/activate && ruff check . --exclude .claude`
+- No unused imports — remove any `import X` not used in the file.
+- No ambiguous single-letter variable names — use `label` not `l`, `line` not `l`, `item` not `i` in comprehensions.
+- Imports sorted: standard library → third-party → local (`from brain.X`).
+
 ## Testing
 - Never test private methods directly. If it needs testing, make it public or test through the public API.
 - Use pydantic for LLM response validation.

@@ -1,5 +1,3 @@
-import os
-import json
 import pytest
 from unittest.mock import MagicMock
 from datetime import datetime, timezone, timedelta
@@ -20,9 +18,9 @@ def make_issue(number, title, labels=None, created_at=None):
     issue.body = "body"
     
     label_mocks = []
-    for l in labels:
+    for label in labels:
         lm = MagicMock()
-        lm.name = l
+        lm.name = label
         label_mocks.append(lm)
     issue.labels = label_mocks
     
@@ -81,8 +79,8 @@ def test_github_client_ensure_labels(mock_github):
     repo_mock = mock_github.return_value.get_repo.return_value
     repo_mock.get_labels.return_value = [MagicMock(name="existing-label")]
     
-    client = GitHubClient("token", "repo")
-    
+    GitHubClient("token", "repo")
+
     assert repo_mock.create_label.call_count >= 7  # All the standard foreman labels
 
 
@@ -261,8 +259,8 @@ def test_run_once_refine_mode(base_agent, mocker):
     mocker.patch.object(base_agent, 'refine_issue', return_value=True)
     mocker.patch.object(base_agent, 'brainstorm')
     
-    stats = base_agent.run_once()
-    
+    base_agent.run_once()
+
     base_agent.auto_promote_refined_issues.assert_called_once()
     base_agent.refine_issue.assert_called_once_with(issue)
     base_agent.brainstorm.assert_not_called()

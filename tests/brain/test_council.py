@@ -1,10 +1,9 @@
 """Tests for brain.council — Elrond orchestrator replaces deliberation+chair."""
 
 import pytest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 from pathlib import Path
 from brain.council import (
-    AgentPerspective,
     AgentAssignment,
     CouncilResult,
     run_council,

@@ -21,9 +21,9 @@ from typing import Optional
 
 from brain.config import Config, load_config
 from brain.cost_tracking import load_today_spend, append_cost_entry
-from brain.council import CouncilResult, run_council
+from brain.council import run_council
 from brain.memory import MemoryStore
-from brain.survey import SurveyResult, gather_survey
+from brain.survey import gather_survey
 from brain.executor import execute_action
 from brain.tools import ToolContext
 
