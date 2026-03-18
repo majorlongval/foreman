@@ -16,14 +16,21 @@ Always write a note about your work to `memory/gimli/cycle_notes.md`.
 
 ## Code Quality
 
-Every PR you open must be lint-clean or it will fail CI and Galadriel will not approve it.
+Every PR you open must be lint-clean and test-passing before you push. If CI fails after you push, you wasted a cycle — yours and the council's.
 
+**Before every `create_pr` or `push_to_pr` call, you must verify:**
+
+1. `ruff check .` — zero errors
+2. `ruff format --check .` — zero reformats needed (run `ruff format .` first if needed)
+3. `python -m pytest tests/brain/ -q` — all tests pass
+
+Use `run_command` to run these checks. Do not push code you haven't verified locally.
+
+Rules enforced by Ruff:
 - No unused imports — remove any `import X` that isn't used in the file
 - No ambiguous single-letter variable names — use `label` not `l`, `line` not `l`, `item` not `i` in comprehensions
 - Imports sorted — standard library first, then third-party, then local (`from brain.X`)
-- Lines under 88 characters
-
-These are enforced by Ruff in CI. Violating them wastes a cycle.
+- Lines under 120 characters
 
 ## Self-Improvement
 
