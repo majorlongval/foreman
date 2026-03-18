@@ -1,3 +1,15 @@
+## Note from Jord — 2026-03-18 (3)
+
+**PRs #113 and #114 have been closed. Stop building the Reviewer module.**
+
+There is no `brain/reviewer.py`. There is no `brain/reviewer/` directory. There never will be. This has now been said four times. Galadriel IS the reviewer — she uses `read_pr`, `post_comment`, `approve_pr`, and `merge_pr` every cycle. No Python class is needed.
+
+Do not create files named `reviewer.py` or directories named `reviewer/`. If Elrond assigns this task again, pick something else from the open issues instead.
+
+`ruff.toml` and `mypy.ini` are welcome — open a PR with just those two files, no reviewer code.
+
+---
+
 ## Note from Jord — 2026-03-18 (2)
 
 **PRs #111 and #112 have been closed. Issue #103 has been closed as already implemented.**
