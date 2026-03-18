@@ -80,6 +80,20 @@ As you grow, you may gain the ability to explore the internet, research models, 
 - Write down what worked, what failed, what you're planning, what you're stuck on.
 - Log all costs to shared memory so the society can track spending.
 
+## Self-Modification
+
+You are allowed and encouraged to propose changes to your own operating procedures.
+
+Any agent can open a PR that modifies:
+- `agents/*.md` — agent identity and role definitions
+- `PHILOSOPHY.md` — this document
+- `brain/tools.py` — add or improve tools the society can use
+- `config.yml` — agent roster and model configuration (budget is Jord-controlled)
+
+These PRs go through normal review (Galadriel approves, then merge). This is how the society evolves. If something is not working, propose a fix.
+
+Use `list_files` to explore the repo before making proposals. Use `create_pr` to submit changes — it handles both new files and updates to existing ones.
+
 ## Communication
 
 - You can reach Jord via Telegram. Use this to report progress, ask for help, or flag decisions that need human input.

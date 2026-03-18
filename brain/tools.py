@@ -1,9 +1,8 @@
 """Seed toolset — minimal tools the brain ships with on day one.
 
 Tools: read_file, create_issue, create_pr, read_memory, write_memory,
-send_telegram, check_budget, list_issues, list_prs.
-
-Reuses existing brain_tools.py for GitHub operations.
+send_telegram, check_budget, list_issues, list_prs, list_files,
+merge_pr, close_issue, close_pr.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from github import GithubException
 from brain.memory import MemoryStore
 from brain.cost_tracking import load_today_spend
 
@@ -182,6 +182,52 @@ TOOL_SCHEMAS = [
             "required": ["pr_number", "comment"],
         },
     },
+    {
+        "name": "list_files",
+        "description": "List files and directories in a repo path. Use this to explore the repo before proposing changes.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Directory path relative to repo root. Defaults to root."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "merge_pr",
+        "description": "Squash-merge an approved pull request. Only available to the critic role.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pr_number": {"type": "integer", "description": "PR number to merge."},
+            },
+            "required": ["pr_number"],
+        },
+    },
+    {
+        "name": "close_issue",
+        "description": "Close a GitHub issue, optionally posting a closing comment.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "issue_number": {"type": "integer", "description": "Issue number to close."},
+                "comment": {"type": "string", "description": "Optional closing comment."},
+            },
+            "required": ["issue_number"],
+        },
+    },
+    {
+        "name": "close_pr",
+        "description": "Close a pull request without merging, optionally posting a comment.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pr_number": {"type": "integer", "description": "PR number to close."},
+                "comment": {"type": "string", "description": "Optional closing comment."},
+            },
+            "required": ["pr_number"],
+        },
+    },
 ]
 
 
@@ -236,12 +282,7 @@ def _create_pr(tool_input: dict, ctx: ToolContext) -> str:
         ctx.repo.create_git_ref(f"refs/heads/{branch}", main_ref.object.sha)
 
         for file_data in tool_input["files"]:
-            ctx.repo.create_file(
-                path=file_data["path"],
-                message=f"Add {file_data['path']}",
-                content=file_data["content"],
-                branch=branch,
-            )
+            _commit_file(ctx, file_data, branch)
 
         pr = ctx.repo.create_pull(
             title=tool_input["title"],
@@ -376,6 +417,95 @@ def _approve_pr(tool_input: dict, ctx: ToolContext) -> str:
         return f"Error approving PR: {e}"
 
 
+def _list_files(tool_input: dict, ctx: ToolContext) -> str:
+    # Lets agents explore the repo directory tree before proposing changes.
+    # Returns each entry with a trailing "/" for directories so callers can tell
+    # at a glance what is a file and what is a folder.
+    path = tool_input.get("path", "")
+    try:
+        contents = ctx.repo.get_contents(path)
+        # get_contents returns a single object for a file, list for a dir
+        if not isinstance(contents, list):
+            contents = [contents]
+        lines = [f"# Contents of '{path or '/'}'" ]
+        for entry in contents:
+            label = f"{entry.name}/" if entry.type == "dir" else entry.name
+            lines.append(f"  {label}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error listing files at '{path}': {e}"
+
+
+def _merge_pr(tool_input: dict, ctx: ToolContext) -> str:
+    # Merging is a high-trust action — only the critic (Galadriel) may do it
+    # after she has already reviewed and approved the PR.
+    if ctx.agent_role != "critic":
+        return "Only the critic role can merge PRs."
+    try:
+        pr = ctx.repo.get_pull(tool_input["pr_number"])
+        pr.merge(merge_method="squash")
+        return f"Merged PR #{tool_input['pr_number']}."
+    except Exception as e:
+        return f"Error merging PR #{tool_input['pr_number']}: {e}"
+
+
+def _close_issue(tool_input: dict, ctx: ToolContext) -> str:
+    try:
+        issue = ctx.repo.get_issue(tool_input["issue_number"])
+        comment = tool_input.get("comment", "")
+        if comment:
+            # Post the comment before closing so it appears in the timeline
+            issue.create_comment(comment)
+        issue.edit(state="closed")
+        return f"Closed issue #{tool_input['issue_number']}."
+    except Exception as e:
+        return f"Error closing issue #{tool_input['issue_number']}: {e}"
+
+
+def _close_pr(tool_input: dict, ctx: ToolContext) -> str:
+    try:
+        pr = ctx.repo.get_pull(tool_input["pr_number"])
+        comment = tool_input.get("comment", "")
+        if comment:
+            # Post the comment before closing so context is preserved
+            pr.create_issue_comment(comment)
+        pr.edit(state="closed")
+        return f"Closed PR #{tool_input['pr_number']}."
+    except Exception as e:
+        return f"Error closing PR #{tool_input['pr_number']}: {e}"
+
+
+def _commit_file(ctx: ToolContext, file_data: dict, branch: str) -> None:
+    """Create or update a single file on the given branch.
+
+    GitHub's Contents API raises a 422 if you call create_file on a path that
+    already has content, so we probe with get_contents first. A GithubException
+    with status 404 means the file doesn't exist yet — use create_file.
+    Any other exception is re-raised so the caller can surface the error.
+    """
+    path = file_data["path"]
+    content = file_data["content"]
+    try:
+        existing = ctx.repo.get_contents(path, ref=branch)
+        ctx.repo.update_file(
+            path=path,
+            message=f"Update {path}",
+            content=content,
+            sha=existing.sha,
+            branch=branch,
+        )
+    except GithubException as e:
+        if e.status == 404:
+            ctx.repo.create_file(
+                path=path,
+                message=f"Add {path}",
+                content=content,
+                branch=branch,
+            )
+        else:
+            raise
+
+
 _HANDLERS = {
     "read_file": _read_file,
     "create_issue": _create_issue,
@@ -389,4 +519,8 @@ _HANDLERS = {
     "read_pr": _read_pr,
     "post_comment": _post_comment,
     "approve_pr": _approve_pr,
+    "list_files": _list_files,
+    "merge_pr": _merge_pr,
+    "close_issue": _close_issue,
+    "close_pr": _close_pr,
 }
