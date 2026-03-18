@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from github.PullRequest import PullRequest
@@ -22,7 +22,7 @@ class PRSafetyStatus:
     """Result of the safety gate check for a PR."""
 
     is_safe: bool
-    reasons: List[str]
+    reasons: list[str]
     approvals: int
     has_changes_requested: bool
     ci_passed: bool
@@ -41,7 +41,7 @@ class AutoMergeAgent:
         1. It is not a draft.
         2. It has at least one approval.
         3. It has no 'Changes Requested' reviews.
-        4. All CI/CD checks have passed.
+        4. All CI/CD checks have passed (at least one check must exist).
         5. It has the 'auto-merge' label (high-confidence gate).
         """
         reasons = []
@@ -52,15 +52,16 @@ class AutoMergeAgent:
 
         # 2. Review check
         # Note: we use get_reviews() to see the full history and find the
-        # latest state for each reviewer.
+        # latest state for each reviewer, ignoring intermediate comments.
         reviews = list(pr.get_reviews())
-        latest_reviews = {}
+        latest_meaningful_reviews = {}
         for review in reviews:
-            latest_reviews[review.user.login] = review.state
+            if review.state in ["APPROVED", "CHANGES_REQUESTED"]:
+                latest_meaningful_reviews[review.user.login] = review.state
 
-        approvals = sum(1 for state in latest_reviews.values() if state == "APPROVED")
+        approvals = sum(1 for state in latest_meaningful_reviews.values() if state == "APPROVED")
         has_changes_requested = any(
-            state == "CHANGES_REQUESTED" for state in latest_reviews.values()
+            state == "CHANGES_REQUESTED" for state in latest_meaningful_reviews.values()
         )
 
         if approvals < 1:
@@ -70,17 +71,28 @@ class AutoMergeAgent:
 
         # 3. CI Check
         # We check the combined status of the head commit.
-        # This covers legacy Statuses. Check Runs are handled separately in some repos.
+        # This covers legacy Statuses and modern Check Runs.
         ci_passed = True
         try:
             head_sha = pr.head.sha
-            combined_status = self.repo.get_commit(head_sha).get_combined_status()
+            commit = self.repo.get_commit(head_sha)
+
+            combined_status = commit.get_combined_status()
+            check_runs = list(commit.get_check_runs())
+
+            total_checks = combined_status.total_count + len(check_runs)
+
+            # Ensure at least one check exists
+            if total_checks == 0:
+                ci_passed = False
+                reasons.append("No CI/CD checks found")
+
+            # Legacy Statuses
             if combined_status.state != "success" and combined_status.total_count > 0:
                 ci_passed = False
                 reasons.append(f"CI/CD status is '{combined_status.state}'")
 
             # Check Runs (modern GitHub Actions)
-            check_runs = self.repo.get_commit(head_sha).get_check_runs()
             for run in check_runs:
                 if run.status == "completed" and run.conclusion not in [
                     "success",
@@ -112,7 +124,7 @@ class AutoMergeAgent:
             ci_passed=ci_passed,
         )
 
-    def process_open_prs(self) -> List[int]:
+    def process_open_prs(self) -> list[int]:
         """Scan all open PRs and merge those that pass the safety gate."""
         merged_ids = []
         try:
@@ -141,7 +153,7 @@ class AutoMergeAgent:
         return merged_ids
 
 
-def run_auto_merge_cycle(repo: Repository) -> List[int]:
+def run_auto_merge_cycle(repo: Repository) -> list[int]:
     """Convenience function to run one auto-merge pass."""
     agent = AutoMergeAgent(repo)
     return agent.process_open_prs()
