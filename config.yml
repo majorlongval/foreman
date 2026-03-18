@@ -13,9 +13,14 @@ models:
   default: "gemini/gemini-3-flash-preview"
   reasoning: "gemini/gemini-3-flash-preview"
   council: "gemini/gemini-3-flash-preview"
+  elrond: "gemini/gemini-3-pro-preview"
 
 # -- Agent Roster (agents can propose additions/removals) --
 agents:
+  elrond:
+    role: orchestrator
+    identity: agents/elrond.md
+    memory: memory/elrond/
   gandalf:
     role: scout
     identity: agents/gandalf.md

@@ -22,6 +22,7 @@ def make_config(daily_limit: float = 5.0) -> Config:
         model_default="gemini/gemini-2.5-flash",
         model_reasoning="gemini/gemini-2.5-pro",
         model_council="anthropic/claude-sonnet-4-6",
+        model_elrond="gemini/gemini-3-pro-preview",
         agents=[
             AgentConfig("gandalf", "scout", Path("agents/gandalf.md"), Path("memory/gandalf/")),
         ],

@@ -88,6 +88,22 @@ class TestConfig(unittest.TestCase):
         config = Config.from_dict(data)
         self.assertEqual(config.agents, [])
 
+    def test_model_elrond_parsed(self):
+        data = {
+            **SAMPLE_CONFIG,
+            "models": {
+                **SAMPLE_CONFIG["models"],
+                "elrond": "gemini/gemini-3-pro-preview",
+            },
+        }
+        config = Config.from_dict(data)
+        self.assertEqual(config.model_elrond, "gemini/gemini-3-pro-preview")
+
+    def test_model_elrond_default(self):
+        """model_elrond defaults to gemini-3-pro-preview when not in YAML."""
+        config = Config.from_dict(SAMPLE_CONFIG)
+        self.assertEqual(config.model_elrond, "gemini/gemini-3-pro-preview")
+
 
 class TestLoadConfig(unittest.TestCase):
     def test_load_from_file(self):

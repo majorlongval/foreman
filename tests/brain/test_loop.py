@@ -6,6 +6,13 @@ from pathlib import Path
 from brain.loop import run_cycle, CycleOutcome
 from brain.config import Config, AgentConfig
 
+# Standard Elrond response for tests — one LLM call, no deliberation
+_ELROND_RESPONSE = (
+    '{"decision": "build it", "action_plan": "step 1",'
+    '"phases": [],'
+    '"flag_for_jord": false, "flag_reason": ""}'
+)
+
 
 def make_config() -> Config:
     return Config(
@@ -13,6 +20,7 @@ def make_config() -> Config:
         model_default="gemini/gemini-2.5-flash",
         model_reasoning="gemini/gemini-2.5-pro",
         model_council="anthropic/claude-sonnet-4-6",
+        model_elrond="gemini/gemini-3-pro-preview",
         agents=[
             AgentConfig("gandalf", "scout", Path("agents/gandalf.md"), Path("memory/gandalf/")),
             AgentConfig("gimli", "builder", Path("agents/gimli.md"), Path("memory/gimli/")),
@@ -47,6 +55,24 @@ def cycle_env(tmp_path: Path):
         "memory_root": memory_root,
         "philosophy": "Be good. Grow.",
     }
+
+
+def _make_elrond_resp() -> MagicMock:
+    """Build a mock LLM response for Elrond's single orchestration call."""
+    resp = MagicMock()
+    resp.text = _ELROND_RESPONSE
+    resp.input_tokens = 200
+    resp.output_tokens = 100
+    return resp
+
+
+def _make_executor_resp() -> MagicMock:
+    resp = MagicMock()
+    resp.tool_calls = []
+    resp.text = "Done."
+    resp.input_tokens = 100
+    resp.output_tokens = 40
+    return resp
 
 
 class TestCycleOutcome:
@@ -114,20 +140,17 @@ class TestRunCycleSuccess:
         mock_repo.get_pulls.return_value = []
 
         mock_llm = MagicMock()
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "lets build", "proposed_action": "create issue"}'
-        agent_resp.input_tokens = 100
-        agent_resp.output_tokens = 50
-        chair_resp = MagicMock()
-        chair_resp.text = '{"decision": "build it", "action_plan": "step 1", "flag_for_jord": false, "flag_reason": ""}'
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
+        # Elrond makes exactly 1 LLM call — return Elrond response
+        elrond_resp = MagicMock()
+        elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'
+        elrond_resp.input_tokens = 200
+        elrond_resp.output_tokens = 100
         executor_resp = MagicMock()
         executor_resp.tool_calls = []
         executor_resp.text = "Done."
         executor_resp.input_tokens = 100
         executor_resp.output_tokens = 40
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete.return_value = elrond_resp
         mock_llm.complete_with_tools.return_value = executor_resp
 
         outcome = run_cycle(
@@ -155,21 +178,8 @@ class TestRunCycleInbox:
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
-        agent_resp.input_tokens = 100
-        agent_resp.output_tokens = 50
-        chair_resp = MagicMock()
-        chair_resp.text = '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}'
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 100
-        executor_resp.output_tokens = 40
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete.return_value = _make_elrond_resp()
+        mock_llm.complete_with_tools.return_value = _make_executor_resp()
 
         outcome = run_cycle(
             config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
@@ -187,21 +197,8 @@ class TestRunCycleInbox:
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
-        agent_resp.input_tokens = 100
-        agent_resp.output_tokens = 50
-        chair_resp = MagicMock()
-        chair_resp.text = '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}'
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 100
-        executor_resp.output_tokens = 40
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete.return_value = _make_elrond_resp()
+        mock_llm.complete_with_tools.return_value = _make_executor_resp()
 
         outcome = run_cycle(
             config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
@@ -233,21 +230,8 @@ class TestRunCycleIncidentNotification:
 class TestRunCycleOutbox:
     def _make_llm(self):
         mock_llm = MagicMock()
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
-        agent_resp.input_tokens = 100
-        agent_resp.output_tokens = 50
-        chair_resp = MagicMock()
-        chair_resp.text = '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}'
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 100
-        executor_resp.output_tokens = 40
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete.return_value = _make_elrond_resp()
+        mock_llm.complete_with_tools.return_value = _make_executor_resp()
         return mock_llm
 
     def test_outbox_triggers_notification_and_is_cleared(self, cycle_env) -> None:
@@ -288,30 +272,26 @@ class TestRunCycleOutbox:
 
 class TestRunCycleMultiAgentExecution:
     def test_each_agent_with_assignment_gets_executor_call(self, cycle_env) -> None:
-        """When the chair assigns tasks to both agents, complete_with_tools is called once per agent."""
+        """When Elrond assigns tasks to both agents, complete_with_tools is called once per agent."""
         mock_repo = MagicMock()
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
-        agent_resp.input_tokens = 100
-        agent_resp.output_tokens = 50
-        chair_resp = MagicMock()
-        chair_resp.text = (
+        elrond_resp = MagicMock()
+        elrond_resp.text = (
             '{"decision": "build and scout", "action_plan": "parallel work",'
             '"phases": [[{"agent": "gandalf", "task": "read brain/tools.py", "deliverable": "memory/gandalf/cycle_notes.md"},'
             '{"agent": "gimli", "task": "create an issue", "deliverable": "issue created"}]],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
+        elrond_resp.input_tokens = 200
+        elrond_resp.output_tokens = 100
         executor_resp = MagicMock()
         executor_resp.tool_calls = []
         executor_resp.text = "Done."
         executor_resp.input_tokens = 100
         executor_resp.output_tokens = 40
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete.return_value = elrond_resp
         mock_llm.complete_with_tools.return_value = executor_resp
 
         outcome = run_cycle(
@@ -324,30 +304,26 @@ class TestRunCycleMultiAgentExecution:
         assert mock_llm.complete_with_tools.call_count == 2
 
     def test_agent_without_assignment_skips_execution(self, cycle_env) -> None:
-        """When the chair only assigns one agent a task, only one executor call is made."""
+        """When Elrond only assigns one agent a task, only one executor call is made."""
         mock_repo = MagicMock()
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
-        agent_resp.input_tokens = 100
-        agent_resp.output_tokens = 50
-        chair_resp = MagicMock()
-        # Only gimli gets an assignment (phase with a single agent)
-        chair_resp.text = (
+        elrond_resp = MagicMock()
+        # Only gimli gets an assignment
+        elrond_resp.text = (
             '{"decision": "build only", "action_plan": "gimli acts",'
             '"phases": [[{"agent": "gimli", "task": "create issue #5", "deliverable": "issue #5 created"}]],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
+        elrond_resp.input_tokens = 200
+        elrond_resp.output_tokens = 100
         executor_resp = MagicMock()
         executor_resp.tool_calls = []
         executor_resp.text = "Done."
         executor_resp.input_tokens = 100
         executor_resp.output_tokens = 40
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete.return_value = elrond_resp
         mock_llm.complete_with_tools.return_value = executor_resp
 
         outcome = run_cycle(
@@ -361,13 +337,6 @@ class TestRunCycleMultiAgentExecution:
 
 class TestRunCyclePhases:
     """Tests for the phases-based execution model."""
-
-    def _make_agent_resp(self):
-        resp = MagicMock()
-        resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
-        resp.input_tokens = 100
-        resp.output_tokens = 50
-        return resp
 
     def _make_executor_resp(self):
         resp = MagicMock()
@@ -383,9 +352,9 @@ class TestRunCyclePhases:
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
-        chair_resp = MagicMock()
+        elrond_resp = MagicMock()
         # Two phases: phase 1 has gandalf, phase 2 has gimli
-        chair_resp.text = (
+        elrond_resp.text = (
             '{"decision": "sequential work", "action_plan": "phase by phase",'
             '"phases": ['
             '  [{"agent": "gandalf", "task": "scout first", "deliverable": "memory/gandalf/cycle_notes.md"}],'
@@ -393,9 +362,9 @@ class TestRunCyclePhases:
             '],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
-        mock_llm.complete.side_effect = [self._make_agent_resp(), self._make_agent_resp(), chair_resp]
+        elrond_resp.input_tokens = 200
+        elrond_resp.output_tokens = 100
+        mock_llm.complete.return_value = elrond_resp
 
         call_order = []
 
@@ -426,15 +395,15 @@ class TestRunCyclePhases:
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
-        chair_resp = MagicMock()
-        chair_resp.text = (
+        elrond_resp = MagicMock()
+        elrond_resp.text = (
             '{"decision": "single agent", "action_plan": "gandalf only",'
             '"phases": [[{"agent": "gandalf", "task": "solo mission", "deliverable": "memory/gandalf/cycle_notes.md"}]],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
-        mock_llm.complete.side_effect = [self._make_agent_resp(), self._make_agent_resp(), chair_resp]
+        elrond_resp.input_tokens = 200
+        elrond_resp.output_tokens = 100
+        mock_llm.complete.return_value = elrond_resp
         mock_llm.complete_with_tools.return_value = self._make_executor_resp()
 
         outcome = run_cycle(
@@ -446,22 +415,22 @@ class TestRunCyclePhases:
         assert mock_llm.complete_with_tools.call_count == 1
 
     def test_unknown_agent_in_phase_skipped(self, cycle_env) -> None:
-        """If the chair assigns a task to an unknown agent name, the cycle still succeeds."""
+        """If Elrond assigns a task to an unknown agent name, the cycle still succeeds."""
         mock_repo = MagicMock()
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
-        chair_resp = MagicMock()
+        elrond_resp = MagicMock()
         # "aragorn" is not in the config (only gandalf, gimli)
-        chair_resp.text = (
+        elrond_resp.text = (
             '{"decision": "delegate", "action_plan": "let aragorn handle it",'
             '"phases": [[{"agent": "aragorn", "task": "lead the charge", "deliverable": "battle won"},'
             '{"agent": "gandalf", "task": "cast spells", "deliverable": "memory/gandalf/cycle_notes.md"}]],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
-        mock_llm.complete.side_effect = [self._make_agent_resp(), self._make_agent_resp(), chair_resp]
+        elrond_resp.input_tokens = 200
+        elrond_resp.output_tokens = 100
+        mock_llm.complete.return_value = elrond_resp
         mock_llm.complete_with_tools.return_value = self._make_executor_resp()
 
         outcome = run_cycle(
@@ -478,23 +447,10 @@ class TestRunCycleSharedMemory:
     """Tests for expanded shared memory reading."""
 
     def _make_cycle_llm(self):
-        """Build a minimal mock LLM that returns valid responses for a full cycle."""
+        """Build a minimal mock LLM that returns valid Elrond response for a full cycle."""
         mock_llm = MagicMock()
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "ok", "proposed_action": "ok"}'
-        agent_resp.input_tokens = 100
-        agent_resp.output_tokens = 50
-        chair_resp = MagicMock()
-        chair_resp.text = '{"decision": "ok", "action_plan": "ok", "flag_for_jord": false, "flag_reason": ""}'
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 100
-        executor_resp.output_tokens = 40
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete.return_value = _make_elrond_resp()
+        mock_llm.complete_with_tools.return_value = _make_executor_resp()
         return mock_llm
 
     def test_shared_memory_includes_non_standard_subdir(self, cycle_env) -> None:
@@ -540,20 +496,16 @@ class TestRunCycleCostPersistence:
         mock_repo.get_pulls.return_value = []
 
         mock_llm = MagicMock()
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "lets build", "proposed_action": "create issue"}'
-        agent_resp.input_tokens = 100
-        agent_resp.output_tokens = 50
-        chair_resp = MagicMock()
-        chair_resp.text = '{"decision": "build it", "action_plan": "step 1", "flag_for_jord": false, "flag_reason": ""}'
-        chair_resp.input_tokens = 200
-        chair_resp.output_tokens = 100
+        elrond_resp = MagicMock()
+        elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'
+        elrond_resp.input_tokens = 100
+        elrond_resp.output_tokens = 50
         executor_resp = MagicMock()
         executor_resp.tool_calls = []
         executor_resp.text = "Done."
         executor_resp.input_tokens = 150
         executor_resp.output_tokens = 60
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+        mock_llm.complete.return_value = elrond_resp
         mock_llm.complete_with_tools.return_value = executor_resp
 
         outcome = run_cycle(
@@ -583,21 +535,8 @@ class TestRunCycleSurveyFailure:
 
         # Survey should still succeed (it catches GitHub errors internally)
         # but with empty issues/PRs
-        agent_resp = MagicMock()
-        agent_resp.text = '{"perspective": "no data", "proposed_action": "wait"}'
-        agent_resp.input_tokens = 50
-        agent_resp.output_tokens = 25
-        chair_resp = MagicMock()
-        chair_resp.text = '{"decision": "wait", "action_plan": "skip", "flag_for_jord": false, "flag_reason": ""}'
-        chair_resp.input_tokens = 100
-        chair_resp.output_tokens = 50
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 80
-        executor_resp.output_tokens = 30
-        mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete.return_value = _make_elrond_resp()
+        mock_llm.complete_with_tools.return_value = _make_executor_resp()
 
         outcome = run_cycle(
             config=cycle_env["config"],

@@ -30,6 +30,7 @@ def full_env(tmp_path: Path):
         model_default="test/model",
         model_reasoning="test/model",
         model_council="test/model",
+        model_elrond="test/model",
         agents=[
             AgentConfig("gandalf", "scout", Path("agents/gandalf.md"), Path("memory/gandalf/")),
             AgentConfig("gimli", "builder", Path("agents/gimli.md"), Path("memory/gimli/")),
@@ -44,20 +45,16 @@ def full_env(tmp_path: Path):
     mock_repo.get_issues.return_value = []
     mock_repo.get_pulls.return_value = []
 
-    # Mock LLM — returns valid JSON for deliberation + chair
-    agent_resp = MagicMock()
-    agent_resp.text = '{"perspective": "We should explore", "proposed_action": "Research models"}'
-    agent_resp.input_tokens = 100
-    agent_resp.output_tokens = 50
-    chair_resp = MagicMock()
-    chair_resp.text = (
+    # Mock LLM — Elrond makes exactly 1 call (no deliberation round anymore)
+    elrond_resp = MagicMock()
+    elrond_resp.text = (
         '{"decision": "Research models", "action_plan": "List available models",'
         '"phases": [[{"agent": "gandalf", "task": "scout available models", "deliverable": "memory/gandalf/cycle_notes.md"},'
         '{"agent": "gimli", "task": "log findings", "deliverable": "memory/gimli/cycle_notes.md"}]],'
         '"flag_for_jord": false, "flag_reason": ""}'
     )
-    chair_resp.input_tokens = 200
-    chair_resp.output_tokens = 100
+    elrond_resp.input_tokens = 200
+    elrond_resp.output_tokens = 100
 
     executor_resp = MagicMock()
     executor_resp.tool_calls = []
@@ -66,7 +63,7 @@ def full_env(tmp_path: Path):
     executor_resp.output_tokens = 40
 
     mock_llm = MagicMock()
-    mock_llm.complete.side_effect = [agent_resp, agent_resp, chair_resp]
+    mock_llm.complete.return_value = elrond_resp
     mock_llm.complete_with_tools.return_value = executor_resp
 
     return {

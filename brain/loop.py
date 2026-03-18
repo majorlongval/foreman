@@ -191,15 +191,11 @@ def run_cycle(
 
     total_cost = council_result.cost_usd + total_execution_cost
 
-    # Step 7: Reflect
+    # Step 7: Reflect — no Perspectives section because Elrond replaced deliberation
     journal_entry = (
         f"# Cycle {datetime.now(timezone.utc).isoformat()}\n\n"
-        f"Chair: {council_result.chair_name}\n\n"
-        f"## Perspectives\n"
-        + "\n".join(
-            f"- **{p.agent_name}**: {p.perspective}" for p in council_result.perspectives
-        )
-        + f"\n\n## Decision\n{council_result.decision}\n\n"
+        f"Orchestrator: {council_result.chair_name}\n\n"
+        f"## Decision\n{council_result.decision}\n\n"
         f"## Action Plan\n{council_result.action_plan}\n\n"
         f"## Cost\n${total_cost:.4f}\n"
     )

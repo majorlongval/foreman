@@ -1,9 +1,12 @@
-"""Council deliberation: each agent gives their perspective, chair decides.
+"""Elrond orchestration: one LLM call assigns tasks to all worker agents.
 
 Flow:
-1. Each agent gets: survey context + PHILOSOPHY.md + own identity + own memory + shared memory
-2. Each responds with their perspective and proposed action
-3. Chair agent receives all perspectives and commits to an action plan
+1. Elrond receives the full world state: survey + all agent memories + shared memory
+2. Elrond returns a structured decision with ordered phases, one task per agent
+3. No deliberation round — Elrond is the sole decision maker for task assignment
+
+This replaces the old council model (N deliberation calls + 1 rotating chair call)
+with a single orchestration call, cutting per-cycle LLM cost by ~80%.
 """
 
 from __future__ import annotations
@@ -26,63 +29,42 @@ log = logging.getLogger("foreman.brain.council")
 
 # ── Prompt templates ──────────────────────────────────────────
 
-DELIBERATION_SYSTEM = """{philosophy}
+# Elrond's identity and lane knowledge. This is the system prompt that shapes
+# how he thinks about the board — he knows each agent's lane and must not
+# assign cross-lane work.
+ELROND_SYSTEM = """You are Elrond, the orchestrator of a multi-agent software development society.
 
----
+You do not build, review, or research yourself. You read the board and move pieces.
+Your job: assign exactly one concrete, deliverable task to each worker agent per cycle.
 
-# Your Identity
+## The Worker Agents
 
-{identity}
+- **gandalf** (scout): creates GitHub issues (new feature/bug found/gap spotted) OR writes a \
+research doc to memory/shared/. His deliverable is always a file written or an issue created.
+- **gimli** (builder): opens one PR with working code, OR pushes meaningful commits to an existing \
+branch. His deliverable is a PR or a commit.
+- **galadriel** (critic): reviews one open PR using read_pr + post_comment with findings, \
+then approves via approve_pr if the code is good. Her deliverable is a PR review posted.
+- **samwise** (gardener): one concrete maintenance action — address review feedback on a PR, \
+close a stale issue, or triage the backlog. His deliverable is a specific issue or PR acted on.
 
-You are {agent_name}, the {agent_role}. \
-You are participating in a council deliberation. \
-Review the current state and give your perspective on what the society \
-should prioritize. Propose a specific action.
+## Assignment Rules
 
-You MUST respond with ONLY a JSON object, no other text:
-{{"perspective": "your analysis", "proposed_action": "specific action to take"}}"""
+- Assign ONE concrete task per agent based on the current world state.
+- Use phases to sequence dependencies: phase 1 runs first (independent), \
+phase 2+ runs after phase 1 completes. Within-cycle phases are for rare true dependencies \
+(e.g. gimli opens a PR in phase 1, galadriel reviews it in phase 2 of the NEXT cycle — \
+don't sequence within a cycle unless gimli's PR is already open and galadriel must review it NOW).
+- Every task MUST specify a concrete deliverable: a specific file written, issue created, \
+PR opened, or comment posted. Vague deliverables are not acceptable.
+- If something is risky (deleting architecture, reverting large changes), flag it for Jord \
+instead of acting.
+- Agents should write a note about their work to memory/{{agent_name}}/cycle_notes.md.
 
-DELIBERATION_USER = """{survey_context}
+The assignable worker agents are: {worker_agent_names}
 
----
-
-# Your Private Memory
-
-{own_memory}
-
-# Shared Memory
-
-{shared_memory}"""
-
-CHAIR_SYSTEM = """{philosophy}
-
----
-
-# Your Identity
-
-{identity}
-
-You are {chair_name}, the {chair_role}. \
-You are the chair for this council cycle. \
-Review all perspectives and synthesize them into a decision. \
-Then assign a specific, concrete task to EACH agent using phases.
-
-Phases let you control execution order:
-- Phase 1 agents run first (independent work in parallel)
-- Phase 2+ agents run after ALL earlier phases complete (can depend on phase 1 output)
-
-Every task MUST specify a concrete deliverable — a specific file written, \
-issue created, PR opened, or comment posted. Vague deliverables are not acceptable.
-Agents should write a note about their work to memory/{{agent_name}}/cycle_notes.md.
-
-If there is a disagreement about something risky (deleting code, \
-changing architecture), flag it for Jord instead of acting.
-
-The agents in this council are: {agent_names}
-
-CRITICAL: The "phases" field is REQUIRED and must contain at least one phase with \
-tasks for ALL agents. If an agent has no specific task, assign them a review or \
-documentation task. Never leave "phases" empty.
+CRITICAL: The "phases" field is REQUIRED and must contain at least one phase with tasks for \
+ALL worker agents. Never leave "phases" empty.
 
 You MUST respond with ONLY a JSON object, no other text:
 {{"decision": "what we will do and why", \
@@ -91,19 +73,25 @@ You MUST respond with ONLY a JSON object, no other text:
 "flag_for_jord": false, \
 "flag_reason": ""}}"""
 
-CHAIR_USER = """{survey_context}
+# User prompt carries the world state: survey context + per-agent memory + shared memory.
+# All agent memories are included so Elrond has full situational awareness.
+ELROND_USER = """{survey_context}
 
 ---
 
-# Council Perspectives
+# Agent Memories
 
-{perspectives_text}"""
+{agent_memories_text}
+
+# Shared Memory
+
+{shared_memory}"""
 
 
 # ── Pydantic response models ─────────────────────────────────
 
 class AgentResponse(BaseModel):
-    """Expected JSON from an agent's deliberation call."""
+    """Expected JSON from an agent's deliberation call (kept for backwards compatibility)."""
     perspective: str
     proposed_action: str
 
@@ -116,7 +104,7 @@ class AgentAssignment(BaseModel):
 
 
 class ChairResponse(BaseModel):
-    """Expected JSON from the chair's decision call.
+    """Expected JSON from Elrond's orchestration call.
 
     phases is a list of phases, each phase is a list of assignments.
     Phases execute in order; assignments within a phase run independently.
@@ -149,7 +137,7 @@ class LLMPort(Protocol):
 
 @dataclass
 class AgentPerspective:
-    """One agent's response during deliberation."""
+    """One agent's response during deliberation (kept for backwards compatibility — no longer used)."""
     agent_name: str
     perspective: str
     proposed_action: str
@@ -157,9 +145,10 @@ class AgentPerspective:
 
 @dataclass
 class CouncilResult:
-    """Outcome of a council deliberation cycle."""
+    """Outcome of one Elrond orchestration cycle."""
+    # perspectives is always [] — deliberation is gone, kept for interface stability
     perspectives: List[AgentPerspective]
-    chair_name: str
+    chair_name: str  # always "elrond"
     decision: str
     action_plan: str
     cost_usd: float = 0.0
@@ -181,185 +170,112 @@ def run_council(
     llm: LLMPort,
     journal_dir: Path,
 ) -> CouncilResult:
-    """Run one council deliberation cycle."""
+    """Run one Elrond orchestration cycle — a single LLM call assigns tasks to all workers."""
     survey_context = survey.to_context_string()
 
-    # Phase 1: Deliberation — one call per agent
-    perspectives: List[AgentPerspective] = []
-    total_cost = 0.0
-    for agent in agents:
-        identity = identity_texts.get(agent.name, f"You are {agent.name}.")
-        own_memory = memory_summaries.get(agent.name, "(no private memory yet)")
+    # Worker agents are all agents except Elrond himself (role=orchestrator).
+    # We exclude the orchestrator from the assignable list so he never self-assigns.
+    worker_agents = [a for a in agents if a.role != "orchestrator"]
 
-        system, user = _build_deliberation_prompt(
-            agent, philosophy, identity, own_memory,
-            shared_memory_summary, survey_context,
-        )
-        try:
-            response = llm.complete(
-                model=config.model_council,
-                system=system,
-                message=user,
-                response_format=AgentResponse,
-            )
-            total_cost += estimate_cost(
-                config.model_council, response.input_tokens, response.output_tokens
-            )
-            parsed = parse_agent_response(response.text)
-            log.info(f"[{agent.name}] {parsed.perspective} → {parsed.proposed_action}")
-            perspectives.append(AgentPerspective(
-                agent_name=agent.name,
-                perspective=parsed.perspective,
-                proposed_action=parsed.proposed_action,
-            ))
-        except Exception as e:
-            log.error(f"Agent {agent.name} deliberation failed: {e}")
-            perspectives.append(AgentPerspective(
-                agent_name=agent.name,
-                perspective=f"(deliberation failed: {e})",
-                proposed_action="",
-            ))
-
-    # Phase 2: Chair decision
-    chair_index = get_chair_index(journal_dir)
-    chair_index = chair_index % len(agents)
-    chair = agents[chair_index]
-
-    chair_identity = identity_texts.get(chair.name, f"You are {chair.name}.")
-    system, user = _build_chair_prompt(
-        chair, philosophy, chair_identity, perspectives, survey_context, agents,
+    system, user = build_elrond_prompt(
+        worker_agents=worker_agents,
+        survey_context=survey_context,
+        memory_summaries=memory_summaries,
+        shared_memory_summary=shared_memory_summary,
     )
+
     try:
         response = llm.complete(
-            model=config.model_council,
+            model=config.model_elrond,
             system=system,
             message=user,
             response_format=ChairResponse,
         )
-        total_cost += estimate_cost(
-            config.model_council, response.input_tokens, response.output_tokens
-        )
+        cost = estimate_cost(config.model_elrond, response.input_tokens, response.output_tokens)
         parsed = parse_chair_response(response.text)
         decision = parsed.decision
         action_plan = parsed.action_plan
         phases = parsed.phases
-        log.info(f"[{chair.name} / chair] Decision: {decision}")
+        log.info(f"[elrond] Decision: {decision}")
         for phase_idx, phase in enumerate(phases):
             for assignment in phase:
-                log.info(f"  → phase {phase_idx + 1} [{assignment.agent}]: {assignment.task} (deliverable: {assignment.deliverable})")
+                log.info(
+                    f"  → phase {phase_idx + 1} [{assignment.agent}]: {assignment.task} "
+                    f"(deliverable: {assignment.deliverable})"
+                )
         if parsed.flag_for_jord:
-            log.warning(f"[{chair.name} / chair] Flagged for Jord: {parsed.flag_reason}")
+            log.warning(f"[elrond] Flagged for Jord: {parsed.flag_reason}")
     except Exception as e:
-        log.error(f"Chair {chair.name} decision failed: {e}")
-        decision = f"Chair decision failed: {e}"
+        log.error(f"Elrond orchestration failed: {e}")
+        decision = f"Elrond orchestration failed: {e}"
         action_plan = ""
         phases = []
-
-    # Rotate chair for next cycle
-    next_index = (chair_index + 1) % len(agents)
-    save_chair_index(journal_dir, next_index)
+        cost = 0.0
 
     return CouncilResult(
-        perspectives=perspectives,
-        chair_name=chair.name,
+        perspectives=[],  # deliberation is gone; field kept for interface stability
+        chair_name="elrond",
         decision=decision,
         action_plan=action_plan,
-        cost_usd=total_cost,
+        cost_usd=cost,
         phases=phases,
     )
 
 
-# ── Chair rotation ────────────────────────────────────────────
+# ── Prompt builder ────────────────────────────────────────────
 
-def get_chair_index(journal_dir: Path) -> int:
-    """Read the current chair index from journal. Returns 0 if not found."""
-    index_file = journal_dir / ".chair_index"
-    if not index_file.exists():
-        return 0
-    try:
-        return int(index_file.read_text().strip())
-    except (ValueError, OSError):
-        return 0
-
-
-def save_chair_index(journal_dir: Path, index: int) -> None:
-    """Save the current chair index for next cycle's rotation."""
-    journal_dir.mkdir(parents=True, exist_ok=True)
-    (journal_dir / ".chair_index").write_text(str(index))
-
-
-# ── Prompt builders ───────────────────────────────────────────
-
-def _build_deliberation_prompt(
-    agent: AgentConfig,
-    philosophy: str,
-    identity: str,
-    own_memory_summary: str,
+def build_elrond_prompt(
+    worker_agents: List[AgentConfig],
+    survey_context: str,
+    memory_summaries: dict[str, str],
     shared_memory_summary: str,
-    survey_context: str,
 ) -> tuple[str, str]:
-    """Build system and user prompts for one agent's deliberation."""
-    system = DELIBERATION_SYSTEM.format(
-        philosophy=philosophy,
-        identity=identity,
-        agent_name=agent.name,
-        agent_role=agent.role,
-    )
-    user = DELIBERATION_USER.format(
-        survey_context=survey_context,
-        own_memory=own_memory_summary,
-        shared_memory=shared_memory_summary,
-    )
-    return system, user
+    """Build Elrond's system and user prompts.
 
+    System: who Elrond is + each agent's lane + JSON format requirement.
+    User: world state — survey + all agent memories + shared memory.
+    """
+    worker_names = ", ".join(a.name for a in worker_agents)
 
-def _build_chair_prompt(
-    chair: AgentConfig,
-    philosophy: str,
-    identity: str,
-    perspectives: List[AgentPerspective],
-    survey_context: str,
-    all_agents: List[AgentConfig],
-) -> tuple[str, str]:
-    """Build system and user prompts for the chair's decision."""
-    perspectives_text = "\n\n".join(
-        f"**{p.agent_name}**: {p.perspective}\n"
-        f"Proposed action: {p.proposed_action}"
-        for p in perspectives
-    )
-    agent_names = ", ".join(a.name for a in all_agents)
-    # Build a concrete phases example so the LLM knows exactly what format to return.
-    # Two phases: first two agents in phase 1, rest in phase 2 (or all in one phase if <=2 agents).
-    if len(all_agents) <= 2:
+    # Concrete phases example so the LLM knows the exact JSON shape to return.
+    # Two phases if >2 agents (to illustrate sequencing), one phase otherwise.
+    if len(worker_agents) <= 2:
         phase1 = ", ".join(
             f'{{"agent": "{a.name}", "task": "task for {a.name}", "deliverable": "memory/{a.name}/cycle_notes.md"}}'
-            for a in all_agents
+            for a in worker_agents
         )
         phase_example = f"[{phase1}]"
     else:
-        mid = len(all_agents) // 2
+        mid = len(worker_agents) // 2
         phase1 = ", ".join(
             f'{{"agent": "{a.name}", "task": "task for {a.name}", "deliverable": "memory/{a.name}/cycle_notes.md"}}'
-            for a in all_agents[:mid]
+            for a in worker_agents[:mid]
         )
         phase2 = ", ".join(
             f'{{"agent": "{a.name}", "task": "task for {a.name}", "deliverable": "memory/{a.name}/cycle_notes.md"}}'
-            for a in all_agents[mid:]
+            for a in worker_agents[mid:]
         )
         phase_example = f"[{phase1}], [{phase2}]"
 
-    system = CHAIR_SYSTEM.format(
-        philosophy=philosophy,
-        identity=identity,
-        chair_name=chair.name,
-        chair_role=chair.role,
-        agent_names=agent_names,
+    system = ELROND_SYSTEM.format(
+        worker_agent_names=worker_names,
         phase_example=phase_example,
     )
-    user = CHAIR_USER.format(
+
+    # Include each agent's private memory keyed by name so Elrond can see
+    # what each agent has been doing and what they planned last cycle.
+    agent_memories_parts = []
+    for agent in worker_agents:
+        summary = memory_summaries.get(agent.name, "(no private memory yet)")
+        agent_memories_parts.append(f"## {agent.name} ({agent.role})\n{summary}")
+    agent_memories_text = "\n\n".join(agent_memories_parts)
+
+    user = ELROND_USER.format(
         survey_context=survey_context,
-        perspectives_text=perspectives_text,
+        agent_memories_text=agent_memories_text,
+        shared_memory=shared_memory_summary,
     )
+
     return system, user
 
 
@@ -414,5 +330,5 @@ def parse_agent_response(text: str) -> AgentResponse:
 
 
 def parse_chair_response(text: str) -> ChairResponse:
-    """Parse the chair's decision response with pydantic validation."""
+    """Parse Elrond's orchestration response with pydantic validation."""
     return ChairResponse.model_validate(parse_json_response(text))

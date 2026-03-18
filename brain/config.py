@@ -35,6 +35,9 @@ class Config:
     model_default: str
     model_reasoning: str
     model_council: str
+    # Elrond is the dedicated orchestrator model — replaces the rotating chair.
+    # One call per cycle instead of N (deliberation) + 1 (chair) calls.
+    model_elrond: str
     agents: List[AgentConfig]
     council_enabled: bool
     max_cycles_per_day: int
@@ -58,6 +61,7 @@ class Config:
             model_default=models.get("default", "gemini/gemini-2.5-flash"),
             model_reasoning=models.get("reasoning", "gemini/gemini-2.5-pro"),
             model_council=models.get("council", "anthropic/claude-sonnet-4-6"),
+            model_elrond=models.get("elrond", "gemini/gemini-3-pro-preview"),
             agents=agents,
             council_enabled=loop.get("council_enabled", True),
             max_cycles_per_day=loop.get("max_cycles_per_day", 12),
