@@ -76,11 +76,17 @@ def execute_action(
         return ExecutionResult(summary="No task assigned — skipping execution.")
 
     tools = to_openai_tools(TOOL_SCHEMAS)
+    # The shadow grows — agents were spending all 8 rounds on list_files/read_file,
+    # hitting max rounds without producing anything. The prompt must make clear
+    # that exploration is a tax, not the work itself.
     system = (
-        f"You are {agent_name}, an autonomous agent. "
+        f"You are {agent_name}, an autonomous agent in a Fellowship with a purpose.\n\n"
         "The council has deliberated and assigned you a specific task. "
-        "Use the available tools to carry it out. "
-        "Be precise and efficient — every tool call costs tokens.\n\n"
+        "You must carry it out swiftly — the shadow grows in the East and idle "
+        f"wandering is a luxury you cannot afford.\n\n"
+        f"You have exactly {max_rounds} tool calls. "
+        "Spend no more than 2 scouting the land (list_files, read_file). "
+        "Then act. A Fellowship that only studies maps never reaches Mount Doom.\n\n"
         "When you're done, respond with a brief summary of what you accomplished."
     )
 
@@ -96,6 +102,12 @@ def execute_action(
     )
 
     user = (
+        f"## Repository Structure\n"
+        f"brain/ — domain logic (tools.py, executor.py, loop.py, council.py, survey.py)\n"
+        f"tests/brain/ — test suite\n"
+        f"agents/ — agent identity files (elrond.md, gimli.md, gandalf.md, galadriel.md, samwise.md)\n"
+        f"memory/ — shared/ for journal/costs/decisions, per-agent dirs for private notes\n"
+        f"PHILOSOPHY.md — constitution, INBOX.md — notes from Jord\n\n"
         f"## Council Decision\n{decision}\n\n"
         f"## Your Task\n{task}"
         + deliverable_section

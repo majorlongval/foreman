@@ -288,3 +288,64 @@ class TestExecuteActionMaxRounds:
         """DEFAULT_MAX_ROUNDS must be 8 — raised from 5 to give agents more room to act."""
         from brain.executor import DEFAULT_MAX_ROUNDS
         assert DEFAULT_MAX_ROUNDS == 8
+
+
+class TestExecuteActionPromptUrgency:
+    """The executor prompt must tell agents to act fast, not explore endlessly.
+
+    Every cycle that ends in 'Executor hit max rounds' with nothing produced is
+    a wasted cycle. Agents were spending all 8 rounds on list_files/read_file.
+    The system prompt must cap exploration and demand swift action.
+    """
+
+    def _capture_system_prompt(self, tool_ctx: ToolContext) -> str:
+        mock_llm = MagicMock()
+        response = MagicMock()
+        response.tool_calls = []
+        response.text = "Done."
+        response.input_tokens = 100
+        response.output_tokens = 20
+        mock_llm.complete_with_tools.return_value = response
+
+        execute_action(
+            task="Build something", agent_name="gimli", decision="build",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
+        call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
+        return next(m["content"] for m in call_messages if m["role"] == "system")
+
+    def test_system_prompt_includes_max_rounds_limit(self, tool_ctx: ToolContext) -> None:
+        """Agent must know how many tool calls they have so they don't waste them."""
+        system = self._capture_system_prompt(tool_ctx)
+        assert "8" in system
+
+    def test_system_prompt_caps_exploration(self, tool_ctx: ToolContext) -> None:
+        """Prompt must explicitly limit how many rounds agents can spend exploring."""
+        system = self._capture_system_prompt(tool_ctx)
+        assert "2" in system  # max 2 exploration calls
+
+    def test_system_prompt_has_tolkien_urgency(self, tool_ctx: ToolContext) -> None:
+        """Prompt must convey urgency — agents were idling through all rounds."""
+        system = self._capture_system_prompt(tool_ctx)
+        # Some flavour of urgency / darkness / east
+        urgent_words = {"shadow", "east", "doom", "darkness", "enemy", "dark"}
+        assert any(w in system.lower() for w in urgent_words)
+
+    def test_user_message_includes_repo_structure(self, tool_ctx: ToolContext) -> None:
+        """Repo structure must be injected into context so agents skip list_files calls."""
+        mock_llm = MagicMock()
+        response = MagicMock()
+        response.tool_calls = []
+        response.text = "Done."
+        response.input_tokens = 100
+        response.output_tokens = 20
+        mock_llm.complete_with_tools.return_value = response
+
+        execute_action(
+            task="Build something", agent_name="gimli", decision="build",
+            llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
+        call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
+        user_msg = next(m["content"] for m in call_messages if m["role"] == "user")
+        assert "brain/" in user_msg
+        assert "agents/" in user_msg
