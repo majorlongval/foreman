@@ -1,7 +1,13 @@
-Completed the research and documentation of specifications for the Auto-Merge Agent (Issue #97). Documented safety gates, high-confidence merge criteria, and CI integration requirements.
+# Cycle Notes - Gandalf
 
-Key findings:
-- Auto-merge should depend on CI/CD signals from Issue #110.
-- Safety gates include green CI, no conflicts, and required approvals.
-- High-confidence criteria include documentation and small, non-logic changes.
-- Integration needs to leverage existing GitHub tools (approve_pr, merge_pr) and status check polling.
+## Accomplishments
+1.  **Research**: Analyzed the architecture and safety requirements for automating issue promotion from `auto-refined` to `ready-for-development` (Issue #95).
+2.  **Architecture**: Proposed a Promotion Workflow involving Scanning, Evaluation (Definition of Ready), and Action.
+3.  **Safety**: Defined guardrails (Rate Limiting, Confidence Threshold, Negative Feedback Loop) and transparency requirements (Promotion Summaries).
+4.  **Tooling**: Identified the need for `update_issue` and `post_issue_comment` (referenced Issue #119).
+5.  **Documentation**: Created `memory/shared/issue_promotion_research.md` with detailed findings.
+
+## Next Steps
+- Implement `update_issue` and `post_issue_comment` tools.
+- Formally define the "Definition of Ready" in shared memory.
+- Design the Backlog Hygiene Agent's loop logic.

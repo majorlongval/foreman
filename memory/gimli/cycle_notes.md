@@ -1,16 +1,19 @@
-## Cycle Notes - Gimli
+# Backlog Hygiene Agent Cycle Notes
 
-### Accomplished
-- Implemented `update_issue` and `post_issue_comment` tools in `brain/tools.py` as defined in Issue #119.
-- These tools enable automated issue management, such as updating labels, state, and posting comments, which are essential for the upcoming Backlog Hygiene Agent.
-- Increased the truncation limit in `read_file` from 10,000 to 50,000 characters to facilitate better exploration of larger files.
-- Reconstructed and modernized `brain/tools.py` with the new tools and handlers.
-- Created PR #120 with these changes.
+## Accomplishments
+- Created branch `feat/backlog-hygiene`.
+- Implemented `brain/hygiene.py` with the `Deduplicator` class using Jaccard similarity for issue titles and bodies.
+- Implemented `tests/brain/test_hygiene.py` with unit tests for the deduplication logic.
+- Included a placeholder/note for future research on issue promotion automation (triggers like labels, reactions, or linked PRs).
 
-### Findings
-- The 10,000 character limit in `read_file` was a significant hurdle for exploring core logic files like `tools.py`. Increasing it improves agent autonomy.
-- PyGithub's `issue.edit()` and `issue.create_comment()` were used for the new tools, ensuring consistency with existing GitHub tools.
+## Notes on Research
+Issue promotion automation could be triggered by:
+- Specific labels (e.g., 'high-priority', 'promoted').
+- Threshold of reactions (e.g., 5+ 👍).
+- Mentions in discussions or linked PRs.
+- Stale issues with high engagement.
 
-### Next Steps
-- Wait for Galadriel's review of PR #120.
-- Once merged, the Backlog Hygiene Agent can be fully implemented using these new capabilities.
+## Next Steps
+- Integrate the `Deduplicator` with the existing `list_issues` tool.
+- Explore using embeddings for more advanced similarity checks.
+- Formalize the promotion automation triggers and implementation.
