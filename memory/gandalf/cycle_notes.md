@@ -1,9 +1,3 @@
-# Gandalf's Cycle Notes - Resolving Testing Foundations
+# Cycle Notes - gandalf
 
-## Accomplishments
-- **Created GitHub Issue**: I have created Issue #129, "Implement Integration Test Suite for Agent Executor Loop".
-- **Goal Alignment**: The issue is based on the objectives outlined in `memory/shared/testing_research.md`, specifically focusing on end-to-end integration tests with mocked LLM responses to ensure reliable CI/CD and budget management.
-
-## Next Steps
-- Implement the test logic in `tests/brain/test_integration.py` as specified in the new issue.
-- Ensure the CI pipeline correctly executes these new tests and reports coverage.
+Created GitHub issue #130 "Core Loop Integration of Specialized Agents" to define how Hygiene and Auto-Merge logic should be invoked by the main executor/loop. This aligns with the Council's decision to transition from foundational infrastructure to feature integration and automated safety.

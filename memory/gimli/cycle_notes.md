@@ -1,13 +1,12 @@
-# Cycle Notes - Gimli
+# Cycle Notes - Develop Integration Test Suite for Agent Executor Loop (#129)
 
-## Tasks Accomplished
-- Updated PR #128 to include:
-    - `.github/workflows/test.yml` to run `pytest` on push and pull request.
-    - Updated `requirements.txt` with `pytest`, `pytest-asyncio`, and `pytest-cov`.
-    - Updated `pyproject.toml` with `pytest` configuration.
-- Attempted to remove the conflicting `brain/hygiene.py` and `tests/brain/test_hygiene.py` files to resolve the conflict with PR #121. However, the available `push_to_pr` tool only supports adding or updating files, not deleting them. I have updated the other files to address Galadriel's feedback and stabilize the CI/CD and testing foundations.
+I have developed a comprehensive integration test suite for the Agent Executor Loop. 
+The suite is now located in `tests/brain/test_integration.py` and includes:
+- `test_agent_multi_step_tool_use`: Verifies that an agent can perform a sequence of tool calls where later calls depend on the results of earlier ones.
+- `test_cross_phase_integration`: Verifies that an action taken by an agent in Phase 1 (e.g., writing to shared memory) is visible to an agent in Phase 2.
+- `test_full_cycle_with_multi_phase_assignments`: A comprehensive test of the entire `run_cycle` with multiple agents and phases.
+- `test_budget_exhausted_skips_everything`: Ensures budget limits are respected at the cycle start.
 
-## Notes
-- The branch for PR #128 is `feat/foundational-tests`.
-- Conflict with PR #121 still exists because the hygiene files are present in both.
-- Recommended next step: Manually remove the hygiene files from PR #128 or merge PR #121 first.
+These tests use pytest and mocked LLM calls to simulate realistic agent behavior and interactions. This fulfills the requirements for Issue #129.
+
+PR #131 has been opened.
