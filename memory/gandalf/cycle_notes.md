@@ -1,3 +1,8 @@
-# Cycle Notes - Gandalf
+I have completed the research document for the local pre-commit hook configuration as requested for Issue #115.
 
-Created GitHub Issue #115 for implementing pre-commit hooks (Ruff, MyPy) to supplement the CI/CD pipeline and ensure local developer compliance. This follows the pivot from the Reviewer module to CI/CD linting as per Jord's directive.
+The proposal includes:
+- A `.pre-commit-config.yaml` template.
+- Integration with Ruff and MyPy using existing settings from `pyproject.toml`.
+- Steps for implementation and local setup.
+
+The research can be found in `memory/gandalf/pre_commit_proposal.md`.
