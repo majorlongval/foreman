@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import Callable
 
 from github import GithubException
-from brain.memory import MemoryStore
+
 from brain.cost_tracking import load_today_spend
+from brain.memory import MemoryStore
 
 log = logging.getLogger("foreman.brain.tools")
 
@@ -88,11 +89,11 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "read_memory",
-        "description": "Read a memory file. Use 'agent_name/file.md' for own memory or 'shared/subdir/file.md' for shared.",
+        "description": "Read a memory file. Use 'agent_name/file.md' for own memory or 'shared/subdir/file.md' for shared.",  # noqa: E501
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Memory path (e.g., 'gandalf/notes.md' or 'shared/costs/2026-03-15.md')."},
+                "path": {"type": "string", "description": "Memory path (e.g., 'gandalf/notes.md' or 'shared/costs/2026-03-15.md')."},  # noqa: E501
             },
             "required": ["path"],
         },
@@ -184,7 +185,7 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "list_files",
-        "description": "List files and directories in a repo path. Use this to explore the repo before proposing changes.",
+        "description": "List files and directories in a repo path. Use this to explore the repo before proposing changes.",  # noqa: E501
         "input_schema": {
             "type": "object",
             "properties": {

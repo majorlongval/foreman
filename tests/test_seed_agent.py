@@ -1,11 +1,10 @@
-import pytest
-from unittest.mock import MagicMock
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import pytest
 import seed_agent
-from seed_agent import GitHubClient, ForemanAgent, load_vision
-
+from seed_agent import ForemanAgent, GitHubClient, load_vision
 
 # ─── Helpers ──────────────────────────────────────────────────
 
@@ -147,7 +146,7 @@ def test_auto_promote_refined_issues_success(base_agent):
 
 def test_auto_promote_skips_hold_label(base_agent):
     now = datetime.now(timezone.utc)
-    issue_hold = make_issue(1, "Hold Issue", [seed_agent.LABEL_AUTO_REFINED, seed_agent.LABEL_HOLD], created_at=now - timedelta(hours=25))
+    issue_hold = make_issue(1, "Hold Issue", [seed_agent.LABEL_AUTO_REFINED, seed_agent.LABEL_HOLD], created_at=now - timedelta(hours=25))  # noqa: E501
     
     base_agent.github.get_auto_refined_issues = MagicMock(return_value=[issue_hold])
     

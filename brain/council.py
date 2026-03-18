@@ -21,8 +21,8 @@ from typing import List, Optional, Protocol
 from pydantic import BaseModel
 
 from brain.config import AgentConfig, Config
-from brain.survey import SurveyResult
 from brain.llm_client import estimate_cost
+from brain.survey import SurveyResult
 
 log = logging.getLogger("foreman.brain.council")
 

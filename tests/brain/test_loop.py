@@ -1,11 +1,13 @@
 """Tests for brain.loop — the Wiggum loop (one cycle)."""
 
 import itertools
-import pytest
-from unittest.mock import MagicMock, patch
 from pathlib import Path
-from brain.loop import run_cycle, CycleOutcome
-from brain.config import Config, AgentConfig
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from brain.config import AgentConfig, Config
+from brain.loop import CycleOutcome, run_cycle
 
 # Standard Elrond response for tests — one LLM call, no deliberation
 _ELROND_RESPONSE = (
@@ -177,7 +179,7 @@ class TestRunCycleSuccess:
         mock_llm = MagicMock()
         # Elrond makes exactly 1 LLM call — return Elrond response
         elrond_resp = MagicMock()
-        elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'
+        elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'  # noqa: E501
         elrond_resp.input_tokens = 200
         elrond_resp.output_tokens = 100
         mock_llm.complete.return_value = elrond_resp
@@ -310,7 +312,7 @@ class TestRunCycleMultiAgentExecution:
         elrond_resp = MagicMock()
         elrond_resp.text = (
             '{"decision": "build and scout", "action_plan": "parallel work",'
-            '"phases": [[{"agent": "gandalf", "task": "read brain/tools.py", "deliverable": "memory/gandalf/cycle_notes.md"},'
+            '"phases": [[{"agent": "gandalf", "task": "read brain/tools.py", "deliverable": "memory/gandalf/cycle_notes.md"},'  # noqa: E501
             '{"agent": "gimli", "task": "create an issue", "deliverable": "issue created"}]],'
             '"flag_for_jord": false, "flag_reason": ""}'
         )
@@ -415,7 +417,7 @@ class TestRunCyclePhases:
         elrond_resp = MagicMock()
         elrond_resp.text = (
             '{"decision": "single agent", "action_plan": "gandalf only",'
-            '"phases": [[{"agent": "gandalf", "task": "solo mission", "deliverable": "memory/gandalf/cycle_notes.md"}]],'
+            '"phases": [[{"agent": "gandalf", "task": "solo mission", "deliverable": "memory/gandalf/cycle_notes.md"}]],'  # noqa: E501
             '"flag_for_jord": false, "flag_reason": ""}'
         )
         elrond_resp.input_tokens = 200
@@ -514,7 +516,7 @@ class TestRunCycleCostPersistence:
 
         mock_llm = MagicMock()
         elrond_resp = MagicMock()
-        elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'
+        elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'  # noqa: E501
         elrond_resp.input_tokens = 100
         elrond_resp.output_tokens = 50
         mock_llm.complete.return_value = elrond_resp

@@ -30,11 +30,12 @@ Usage:
     print(response.input_tokens, response.output_tokens, response.cost_usd)
 """
 
-import os
 import logging
-import litellm
+import os
 from dataclasses import dataclass
 from typing import List
+
+import litellm
 
 log = logging.getLogger("foreman.llm")
 

@@ -1,19 +1,19 @@
 """Tests for brain.survey — gather world state for council deliberation."""
 
 import json
-import unittest
-import tempfile
-import sys
 import os
-from unittest.mock import MagicMock
-from pathlib import Path
+import sys
+import tempfile
+import unittest
 from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import MagicMock
 
 # Ensure project root is in path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from brain.survey import SurveyResult, gather_survey, _read_recent_files
-from brain.config import Config, AgentConfig
+from brain.config import AgentConfig, Config
+from brain.survey import SurveyResult, _read_recent_files, gather_survey
 
 
 def make_config(daily_limit: float = 5.0) -> Config:

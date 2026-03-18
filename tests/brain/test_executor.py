@@ -1,10 +1,12 @@
 """Tests for brain.executor — tool-use execution loop."""
 
 import json
-import pytest
-from unittest.mock import MagicMock
 from pathlib import Path
-from brain.executor import execute_action, to_openai_tools, ExecutionResult
+from unittest.mock import MagicMock
+
+import pytest
+
+from brain.executor import ExecutionResult, execute_action, to_openai_tools
 from brain.tools import TOOL_SCHEMAS, ToolContext
 
 

@@ -1,10 +1,12 @@
 """Tests for brain.tools — seed toolset definitions and execution."""
 
-import pytest
-from unittest.mock import MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 from github import GithubException
-from brain.tools import TOOL_SCHEMAS, execute_tool, ToolContext
+
+from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 
 
 @pytest.fixture

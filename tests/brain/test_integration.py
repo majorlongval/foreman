@@ -1,11 +1,13 @@
 """Integration test — full brain cycle with mocks."""
 
 import json
-import pytest
-from unittest.mock import MagicMock
-from pathlib import Path
 from datetime import datetime, timezone
-from brain.config import Config, AgentConfig
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+from brain.config import AgentConfig, Config
 from brain.loop import run_cycle
 
 
@@ -49,7 +51,7 @@ def full_env(tmp_path: Path):
     elrond_resp = MagicMock()
     elrond_resp.text = (
         '{"decision": "Research models", "action_plan": "List available models",'
-        '"phases": [[{"agent": "gandalf", "task": "scout available models", "deliverable": "memory/gandalf/cycle_notes.md"},'
+        '"phases": [[{"agent": "gandalf", "task": "scout available models", "deliverable": "memory/gandalf/cycle_notes.md"},'  # noqa: E501
         '{"agent": "gimli", "task": "log findings", "deliverable": "memory/gimli/cycle_notes.md"}]],'
         '"flag_for_jord": false, "flag_reason": ""}'
     )

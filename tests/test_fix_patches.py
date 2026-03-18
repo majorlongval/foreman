@@ -1,11 +1,11 @@
 # tests/test_fix_patches.py
 """Tests for fix_agent patch helper functions."""
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from fix_agent import parse_json, apply_patches, check_scope
+from fix_agent import apply_patches, check_scope, parse_json
 
 
 class TestParseJson:
