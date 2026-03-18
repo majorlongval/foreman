@@ -1,8 +1,6 @@
-"""Seed toolset — minimal tools the brain ships with on day one.
+"""Seed toolset — minimal tools the brain ships with.
 
-Tools: read_file, create_issue, create_pr, push_to_pr, read_memory, write_memory,
-send_telegram, check_budget, list_issues, list_prs, list_files,
-merge_pr, close_issue, close_pr, update_issue, post_issue_comment.
+Includes tools for file manipulation, issue/PR management, memory, and communication.
 """
 
 from __future__ import annotations
@@ -11,8 +9,6 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-
-from github import GithubException
 
 from brain.cost_tracking import load_today_spend
 from brain.memory import MemoryStore
@@ -89,14 +85,20 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "read_memory",
-        "description": "Read a memory file. Use 'agent_name/file.md' for own memory or 'shared/subdir/file.md' for shared.",  # noqa: E501
+        "description": (
+            "Read a memory file. Use 'agent_name/file.md' for own memory "
+            "or 'shared/subdir/file.md' for shared."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Memory path (e.g., 'gandalf/notes.md' or 'shared/costs/2026-03-15.md').",
-                },  # noqa: E501
+                    "description": (
+                        "Memory path (e.g., 'gandalf/notes.md' or "
+                        "'shared/costs/2026-03-15.md')."
+                    ),
+                },
             },
             "required": ["path"],
         },
@@ -153,7 +155,10 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "read_pr",
-        "description": "Read a pull request: title, body, changed files, diff, and existing comments.",
+        "description": (
+            "Read a pull request: title, body, changed files, diff, "
+            "and existing comments."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -188,11 +193,17 @@ TOOL_SCHEMAS = [
     },
     {
         "name": "list_files",
-        "description": "List files and directories in a repo path. Use this to explore the repo before proposing changes.",  # noqa: E501
+        "description": (
+            "List files and directories in a repo path. "
+            "Use this to explore the repo before proposing changes."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Directory path relative to repo root. Defaults to root."},
+                "path": {
+                    "type": "string",
+                    "description": "Directory path relative to repo root. Defaults to root.",
+                },
             },
             "required": [],
         },
@@ -325,13 +336,11 @@ def _read_file(tool_input: dict, ctx: ToolContext) -> str:
 
 def _create_issue(tool_input: dict, ctx: ToolContext) -> str:
     try:
-        labels = tool_input.get("labels", [])
         label_objects = []
-        for name in labels:
+        for name in tool_input.get("labels", []):
             try:
                 label_objects.append(ctx.repo.get_label(name))
             except Exception:
-                # If label doesn't exist, we skip it
                 pass
         issue = ctx.repo.create_issue(
             title=tool_input["title"],
@@ -346,7 +355,10 @@ def _create_issue(tool_input: dict, ctx: ToolContext) -> str:
 def _create_pr(tool_input: dict, ctx: ToolContext) -> str:
     try:
         base_branch = ctx.repo.get_branch("main")
-        ctx.repo.create_git_ref(ref=f"refs/heads/{tool_input['branch']}", sha=base_branch.commit.sha)
+        ctx.repo.create_git_ref(
+            ref=f"refs/heads/{tool_input['branch']}",
+            sha=base_branch.commit.sha,
+        )
 
         for file in tool_input["files"]:
             try:
@@ -434,15 +446,11 @@ def _list_issues(tool_input: dict, ctx: ToolContext) -> str:
     try:
         issues = ctx.repo.get_issues(state="open")
         lines = ["# Open Issues"]
-        count = 0
         for issue in issues:
             if issue.pull_request is None:
                 labels = ", ".join(l.name for l in issue.labels)
                 label_str = f" [{labels}]" if labels else ""
                 lines.append(f"  - #{issue.number}: {issue.title}{label_str}")
-                count += 1
-        if count == 0:
-            return "No open issues found."
         return "\n".join(lines)
     except Exception as e:
         return f"Error listing issues: {e}"
@@ -451,13 +459,9 @@ def _list_issues(tool_input: dict, ctx: ToolContext) -> str:
 def _list_prs(tool_input: dict, ctx: ToolContext) -> str:
     try:
         prs = ctx.repo.get_pulls(state="open")
-        lines = ["# Open PRs"]
-        count = 0
+        lines = [f"# Open PRs ({prs.totalCount})"]
         for pr in prs:
-            lines.append(f"  - PR #{pr.number}: {pr.title} ({pr.user.login})")
-            count += 1
-        if count == 0:
-            return "No open PRs found."
+            lines.append(f"  - PR #{pr.number}: {pr.title}")
         return "\n".join(lines)
     except Exception as e:
         return f"Error listing PRs: {e}"
@@ -466,41 +470,37 @@ def _list_prs(tool_input: dict, ctx: ToolContext) -> str:
 def _read_pr(tool_input: dict, ctx: ToolContext) -> str:
     try:
         pr = ctx.repo.get_pull(tool_input["pr_number"])
-        lines = [
-            f"# PR #{pr.number}: {pr.title}",
-            f"Author: {pr.user.login}",
-            f"State: {pr.state}",
-            "",
-            pr.body or "(no body)",
-            "",
-            "## Files Changed",
-        ]
-        for f in pr.get_files():
-            lines.append(f"  - {f.filename}")
+        files = pr.get_files()
+        comments = pr.get_issue_comments()
+
+        lines = [f"# PR #{pr.number}: {pr.title}", "", pr.body or "", ""]
+        lines.append("## Changed Files")
+        for f in files:
+            lines.append(f"### {f.filename}")
             if f.patch:
-                if len(f.patch) > 5000:
-                    lines.append(f"    (patch truncated)\n{f.patch[:5000]}")
+                if len(f.patch) > 10000:
+                    lines.append(f"{f.patch[:10000]}\n\n--- truncated ---")
                 else:
-                    lines.append(f"    {f.patch}")
+                    lines.append(f.patch)
+            lines.append("")
 
-        lines.append("\n## Comments")
-        for c in pr.get_issue_comments():
-            lines.append(f"### {c.user.login}\n{c.body}\n")
+        if comments.totalCount > 0:
+            lines.append("## Comments")
+            for c in comments:
+                lines.append(f"**{c.user.login}**: {c.body}\n")
 
+        # CI checks
         try:
             commit = ctx.repo.get_commit(pr.head.sha)
             checks = commit.get_check_runs()
             if checks.totalCount > 0:
-                lines.append("\n## CI Checks")
+                lines.append("## CI Checks")
                 for check in checks:
-                    lines.append(f"  - {check.name}: {check.conclusion or 'in_progress'}")
+                    lines.append(f"  - {check.name}: {check.conclusion}")
         except Exception:
             pass
 
-        content = "\n".join(lines)
-        if len(content) > 15000:
-            return f"{content[:15000]}\n\n--- truncated ---"
-        return content
+        return "\n".join(lines)
     except Exception as e:
         return f"Error reading PR: {e}"
 
@@ -508,8 +508,8 @@ def _read_pr(tool_input: dict, ctx: ToolContext) -> str:
 def _post_comment(tool_input: dict, ctx: ToolContext) -> str:
     try:
         pr = ctx.repo.get_pull(tool_input["pr_number"])
-        pr.create_issue_comment(tool_input["body"])
-        return f"Comment posted to PR #{tool_input['pr_number']}"
+        comment = pr.create_issue_comment(tool_input["body"])
+        return f"Comment posted: {comment.html_url}"
     except Exception as e:
         return f"Error posting comment: {e}"
 
@@ -520,18 +520,20 @@ def _approve_pr(tool_input: dict, ctx: ToolContext) -> str:
     try:
         pr = ctx.repo.get_pull(tool_input["pr_number"])
         pr.create_review(body=tool_input["comment"], event="APPROVE")
-        return f"PR #{tool_input['pr_number']} approved."
+        return f"PR #{pr.number} approved."
     except Exception as e:
         return f"Error approving PR: {e}"
 
 
 def _list_files(tool_input: dict, ctx: ToolContext) -> str:
     try:
-        path = tool_input.get("path", "")
-        contents = ctx.repo.get_contents(path, ref="main")
-        lines = [f"# Contents of '{path or 'root'}'"]
-        for c in contents:
-            lines.append(f"  {'[DIR] ' if c.type == 'dir' else '      '}{c.name}")
+        path = tool_input.get("path", ".")
+        items = ctx.repo.get_contents(path, ref="main")
+        if not isinstance(items, list):
+            items = [items]
+        lines = [f"# Contents of '{path}'"]
+        for item in items:
+            lines.append(f"  {item.name}")
         return "\n".join(lines)
     except Exception as e:
         return f"Error listing files: {e}"
@@ -543,7 +545,7 @@ def _merge_pr(tool_input: dict, ctx: ToolContext) -> str:
     try:
         pr = ctx.repo.get_pull(tool_input["pr_number"])
         pr.merge(merge_method="squash")
-        return f"PR #{tool_input['pr_number']} merged."
+        return f"PR #{pr.number} merged."
     except Exception as e:
         return f"Error merging PR: {e}"
 
@@ -551,10 +553,10 @@ def _merge_pr(tool_input: dict, ctx: ToolContext) -> str:
 def _close_issue(tool_input: dict, ctx: ToolContext) -> str:
     try:
         issue = ctx.repo.get_issue(tool_input["issue_number"])
-        if "comment" in tool_input:
+        if tool_input.get("comment"):
             issue.create_comment(tool_input["comment"])
         issue.edit(state="closed")
-        return f"Issue #{tool_input['issue_number']} closed."
+        return f"Issue #{issue.number} closed."
     except Exception as e:
         return f"Error closing issue: {e}"
 
@@ -562,10 +564,10 @@ def _close_issue(tool_input: dict, ctx: ToolContext) -> str:
 def _close_pr(tool_input: dict, ctx: ToolContext) -> str:
     try:
         pr = ctx.repo.get_pull(tool_input["pr_number"])
-        if "comment" in tool_input:
+        if tool_input.get("comment"):
             pr.create_issue_comment(tool_input["comment"])
         pr.edit(state="closed")
-        return f"PR #{tool_input['pr_number']} closed."
+        return f"PR #{pr.number} closed."
     except Exception as e:
         return f"Error closing PR: {e}"
 
@@ -591,7 +593,7 @@ def _push_to_pr(tool_input: dict, ctx: ToolContext) -> str:
                     content=file["content"],
                     branch=branch,
                 )
-        return f"Pushed updates to PR #{tool_input['pr_number']} branch '{branch}'."
+        return f"Pushed to PR #{pr.number} branch {branch}"
     except Exception as e:
         return f"Error pushing to PR: {e}"
 
@@ -599,36 +601,34 @@ def _push_to_pr(tool_input: dict, ctx: ToolContext) -> str:
 def _update_issue(tool_input: dict, ctx: ToolContext) -> str:
     try:
         issue = ctx.repo.get_issue(tool_input["issue_number"])
-        update_kwargs = {}
+        kwargs = {}
         if "title" in tool_input:
-            update_kwargs["title"] = tool_input["title"]
+            kwargs["title"] = tool_input["title"]
         if "body" in tool_input:
-            update_kwargs["body"] = tool_input["body"]
+            kwargs["body"] = tool_input["body"]
         if "state" in tool_input:
-            update_kwargs["state"] = tool_input["state"]
+            kwargs["state"] = tool_input["state"]
         if "labels" in tool_input:
-            update_kwargs["labels"] = tool_input["labels"]
-
-        issue.edit(**update_kwargs)
-        return f"Issue #{tool_input['issue_number']} updated."
+            kwargs["labels"] = tool_input["labels"]
+        issue.edit(**kwargs)
+        return f"Issue #{issue.number} updated."
     except Exception as e:
-        return f"Error updating issue #{tool_input['issue_number']}: {e}"
+        return f"Error updating issue: {e}"
 
 
 def _post_issue_comment(tool_input: dict, ctx: ToolContext) -> str:
     try:
         issue = ctx.repo.get_issue(tool_input["issue_number"])
-        issue.create_comment(tool_input["body"])
-        return f"Comment posted to issue #{tool_input['issue_number']}."
+        comment = issue.create_comment(tool_input["body"])
+        return f"Comment posted: {comment.html_url}"
     except Exception as e:
-        return f"Error posting comment to issue #{tool_input['issue_number']}: {e}"
+        return f"Error posting comment: {e}"
 
 
 _HANDLERS = {
     "read_file": _read_file,
     "create_issue": _create_issue,
     "create_pr": _create_pr,
-    "push_to_pr": _push_to_pr,
     "read_memory": _read_memory,
     "write_memory": _write_memory,
     "send_telegram": _send_telegram,
@@ -642,6 +642,7 @@ _HANDLERS = {
     "merge_pr": _merge_pr,
     "close_issue": _close_issue,
     "close_pr": _close_pr,
+    "push_to_pr": _push_to_pr,
     "update_issue": _update_issue,
     "post_issue_comment": _post_issue_comment,
 }
