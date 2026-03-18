@@ -123,7 +123,7 @@ def execute_action(
     total_cost = 0.0
 
     try:
-        for round_num in range(max_rounds):
+        for _round_num in range(max_rounds):
             response = llm.complete_with_tools(
                 model=model,
                 messages=messages,

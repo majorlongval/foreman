@@ -375,7 +375,7 @@ def _create_pr(tool_input: dict, ctx: ToolContext) -> str:
                 # File doesn't exist, create it
                 ctx.repo.create_file(
                     path=file["path"],
-                    message=f"Create {file['path']}",
+                    message=f"Add {file['path']}",
                     content=file["content"],
                     branch=tool_input["branch"],
                 )
@@ -448,7 +448,7 @@ def _list_issues(tool_input: dict, ctx: ToolContext) -> str:
         lines = ["# Open Issues"]
         for issue in issues:
             if issue.pull_request is None:
-                labels = ", ".join(l.name for l in issue.labels)
+                labels = ", ".join(label.name for label in issue.labels)
                 label_str = f" [{labels}]" if labels else ""
                 lines.append(f"  - #{issue.number}: {issue.title}{label_str}")
         return "\n".join(lines)
@@ -459,7 +459,9 @@ def _list_issues(tool_input: dict, ctx: ToolContext) -> str:
 def _list_prs(tool_input: dict, ctx: ToolContext) -> str:
     try:
         prs = ctx.repo.get_pulls(state="open")
-        lines = [f"# Open PRs ({prs.totalCount})"]
+        pr_list = list(prs)
+        lines = [f"# Open PRs ({len(pr_list)})"]
+        prs = pr_list
         for pr in prs:
             lines.append(f"  - PR #{pr.number}: {pr.title}")
         return "\n".join(lines)
@@ -484,18 +486,19 @@ def _read_pr(tool_input: dict, ctx: ToolContext) -> str:
                     lines.append(f.patch)
             lines.append("")
 
-        if comments.totalCount > 0:
+        comment_list = list(comments)
+        if comment_list:
             lines.append("## Comments")
-            for c in comments:
+            for c in comment_list:
                 lines.append(f"**{c.user.login}**: {c.body}\n")
 
         # CI checks
         try:
             commit = ctx.repo.get_commit(pr.head.sha)
-            checks = commit.get_check_runs()
-            if checks.totalCount > 0:
+            check_list = list(commit.get_check_runs())
+            if check_list:
                 lines.append("## CI Checks")
-                for check in checks:
+                for check in check_list:
                     lines.append(f"  - {check.name}: {check.conclusion}")
         except Exception:
             pass
@@ -527,13 +530,14 @@ def _approve_pr(tool_input: dict, ctx: ToolContext) -> str:
 
 def _list_files(tool_input: dict, ctx: ToolContext) -> str:
     try:
-        path = tool_input.get("path", ".")
-        items = ctx.repo.get_contents(path, ref="main")
+        path = tool_input.get("path", "")
+        items = ctx.repo.get_contents(path)
         if not isinstance(items, list):
             items = [items]
         lines = [f"# Contents of '{path}'"]
         for item in items:
-            lines.append(f"  {item.name}")
+            suffix = "/" if item.type == "dir" else ""
+            lines.append(f"  {item.name}{suffix}")
         return "\n".join(lines)
     except Exception as e:
         return f"Error listing files: {e}"
@@ -589,7 +593,7 @@ def _push_to_pr(tool_input: dict, ctx: ToolContext) -> str:
             except Exception:
                 ctx.repo.create_file(
                     path=file["path"],
-                    message=f"Create {file['path']}",
+                    message=f"Add {file['path']}",
                     content=file["content"],
                     branch=branch,
                 )
