@@ -27,7 +27,7 @@ def make_config() -> Config:
             AgentConfig("gimli", "builder", Path("agents/gimli.md"), Path("memory/gimli/")),
         ],
         council_enabled=True,
-        max_cycles_per_day=12,
+        max_cycles_per_day=24,
         telegram_enabled=True,
     )
 
@@ -137,7 +137,7 @@ class TestCycleOutcome:
         costs_dir = cycle_env["memory_root"] / "shared" / "costs"
         cost_file = costs_dir / f"{today}.jsonl"
         entry = json.dumps({"action": "council", "cost_usd": 0.01})
-        cost_file.write_text("\n".join([entry] * 12) + "\n")  # 12 = max_cycles_per_day
+        cost_file.write_text("\n".join([entry] * 24) + "\n")  # 24 = max_cycles_per_day
 
         mock_llm = MagicMock()
         outcome = run_cycle(

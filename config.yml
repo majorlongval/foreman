@@ -40,9 +40,9 @@ agents:
 
 # -- Brain Loop --
 loop:
-  schedule: "every 2 hours"
+  schedule: "every 1 hour"
   council_enabled: true
-  max_cycles_per_day: 12
+  max_cycles_per_day: 24
 
 # -- Communication --
 communication:
