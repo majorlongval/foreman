@@ -3,6 +3,9 @@ PyGithub>=2.1.0
 python-telegram-bot>=21.0
 litellm>=1.52.0
 pyyaml>=6.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
 
 # Optional providers — install only what you need:
 # pip install google-genai     # for Gemini
