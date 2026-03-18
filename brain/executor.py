@@ -120,6 +120,20 @@ def execute_action(
             total_cost += estimate_cost(model, response.input_tokens, response.output_tokens)
 
             if not response.tool_calls:
+                # Only accept a "done" response once the agent has used at least one tool.
+                # Without this, agents return text like "I will create an issue" without
+                # actually calling create_issue — promising the deliverable instead of producing it.
+                if not actions_taken:
+                    messages.append({"role": "assistant", "content": response.text or ""})
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "You have not used any tool yet. "
+                            "You must use at least one tool to produce your deliverable. "
+                            "Please proceed with a tool call now."
+                        ),
+                    })
+                    continue
                 summary = response.text or _summarize_actions(actions_taken)
                 return ExecutionResult(summary=summary, cost_usd=total_cost)
 

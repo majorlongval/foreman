@@ -50,6 +50,61 @@ class TestExecuteActionNoTools:
         mock_llm.complete_with_tools.assert_not_called()
 
 
+class TestExecuteActionDeliverableEnforcement:
+    def test_pushes_back_if_no_tool_called_on_first_round(self, tool_ctx: ToolContext) -> None:
+        """If the LLM returns text with no tool calls on round 1, executor must push back.
+
+        Agents were returning 'I will create an issue' without actually calling create_issue.
+        The executor must not accept a no-tool response until at least one tool has been used.
+        """
+        mock_llm = MagicMock()
+
+        # Round 1: text only, no tools — agent is "promising" without doing
+        first_response = MagicMock()
+        first_response.tool_calls = []
+        first_response.text = "I will create an issue about the missing feature."
+        first_response.input_tokens = 100
+        first_response.output_tokens = 40
+
+        # Round 2: agent uses a tool after the pushback
+        tool_call = MagicMock()
+        tool_call.id = "call_1"
+        tool_call.function.name = "create_issue"
+        tool_call.function.arguments = '{"title": "Missing feature", "body": "details"}'
+        second_response = MagicMock()
+        second_response.tool_calls = [tool_call]
+        second_response.text = ""
+        second_response.input_tokens = 120
+        second_response.output_tokens = 50
+        second_response.raw_message = {"role": "assistant", "tool_calls": [
+            {"id": "call_1", "type": "function", "function": {
+                "name": "create_issue", "arguments": '{"title": "Missing feature", "body": "details"}'
+            }}
+        ]}
+
+        # Round 3: done
+        third_response = MagicMock()
+        third_response.tool_calls = []
+        third_response.text = "Issue created."
+        third_response.input_tokens = 80
+        third_response.output_tokens = 10
+
+        mock_llm.complete_with_tools.side_effect = [first_response, second_response, third_response]
+
+        execute_action(
+            task="Create an issue for the missing feature", agent_name="gandalf",
+            decision="scout", llm=mock_llm, tool_ctx=tool_ctx, model="test/model",
+        )
+
+        # Must have made at least 2 calls (pushback + retry), not just 1
+        assert mock_llm.complete_with_tools.call_count >= 2
+
+        # The pushback message must have been injected into the conversation
+        second_call_messages = mock_llm.complete_with_tools.call_args_list[1][1]["messages"]
+        pushback_texts = [m.get("content", "") for m in second_call_messages if m.get("role") == "user"]
+        assert any("tool" in t.lower() or "deliverable" in t.lower() for t in pushback_texts)
+
+
 class TestExecuteActionTextResponse:
     def test_llm_returns_text_only(self, tool_ctx: ToolContext) -> None:
         """LLM decides no tool calls needed — just returns text."""

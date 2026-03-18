@@ -1,5 +1,6 @@
 """Tests for brain.loop — the Wiggum loop (one cycle)."""
 
+import itertools
 import pytest
 from unittest.mock import MagicMock, patch, call
 from pathlib import Path
@@ -66,13 +67,47 @@ def _make_elrond_resp() -> MagicMock:
     return resp
 
 
+def _make_executor_side_effect() -> itertools.cycle:
+    """Build a repeating side_effect for complete_with_tools that satisfies deliverable enforcement.
+
+    The executor now requires at least one tool call before accepting a done response.
+    We cycle through: [tool_call_resp, done_resp, tool_call_resp, done_resp, ...]
+    so any number of agents × 2 rounds works without running out of responses.
+    """
+    tool_call = MagicMock()
+    tool_call.id = "call_wm"
+    tool_call.function.name = "write_memory"
+    tool_call.function.arguments = '{"agent_name": "agent", "filename": "cycle_notes.md", "content": "done"}'
+
+    tool_resp = MagicMock()
+    tool_resp.tool_calls = [tool_call]
+    tool_resp.text = ""
+    tool_resp.input_tokens = 100
+    tool_resp.output_tokens = 40
+    tool_resp.raw_message = {"role": "assistant", "tool_calls": [
+        {"id": "call_wm", "type": "function", "function": {
+            "name": "write_memory",
+            "arguments": '{"agent_name": "agent", "filename": "cycle_notes.md", "content": "done"}',
+        }}
+    ]}
+
+    done_resp = MagicMock()
+    done_resp.tool_calls = []
+    done_resp.text = "Done."
+    done_resp.input_tokens = 60
+    done_resp.output_tokens = 10
+
+    return itertools.cycle([tool_resp, done_resp])
+
+
 def _make_executor_resp() -> MagicMock:
-    resp = MagicMock()
-    resp.tool_calls = []
-    resp.text = "Done."
-    resp.input_tokens = 100
-    resp.output_tokens = 40
-    return resp
+    """Convenience wrapper — returns a MagicMock pre-wired with the cycle side_effect.
+
+    Usage: mock_llm.complete_with_tools.side_effect = _make_executor_resp().side_effect
+    """
+    m = MagicMock()
+    m.side_effect = _make_executor_side_effect()
+    return m
 
 
 class TestCycleOutcome:
@@ -145,13 +180,8 @@ class TestRunCycleSuccess:
         elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'
         elrond_resp.input_tokens = 200
         elrond_resp.output_tokens = 100
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 100
-        executor_resp.output_tokens = 40
         mock_llm.complete.return_value = elrond_resp
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
             config=cycle_env["config"],
@@ -179,7 +209,7 @@ class TestRunCycleInbox:
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
         mock_llm.complete.return_value = _make_elrond_resp()
-        mock_llm.complete_with_tools.return_value = _make_executor_resp()
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
             config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
@@ -198,7 +228,7 @@ class TestRunCycleInbox:
         mock_repo.get_pulls.return_value = []
         mock_llm = MagicMock()
         mock_llm.complete.return_value = _make_elrond_resp()
-        mock_llm.complete_with_tools.return_value = _make_executor_resp()
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
             config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
@@ -231,7 +261,7 @@ class TestRunCycleOutbox:
     def _make_llm(self):
         mock_llm = MagicMock()
         mock_llm.complete.return_value = _make_elrond_resp()
-        mock_llm.complete_with_tools.return_value = _make_executor_resp()
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
         return mock_llm
 
     def test_outbox_triggers_notification_and_is_cleared(self, cycle_env) -> None:
@@ -272,7 +302,7 @@ class TestRunCycleOutbox:
 
 class TestRunCycleMultiAgentExecution:
     def test_each_agent_with_assignment_gets_executor_call(self, cycle_env) -> None:
-        """When Elrond assigns tasks to both agents, complete_with_tools is called once per agent."""
+        """When Elrond assigns tasks to both agents, complete_with_tools is called twice per agent (tool + done)."""
         mock_repo = MagicMock()
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
@@ -286,13 +316,8 @@ class TestRunCycleMultiAgentExecution:
         )
         elrond_resp.input_tokens = 200
         elrond_resp.output_tokens = 100
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 100
-        executor_resp.output_tokens = 40
         mock_llm.complete.return_value = elrond_resp
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
             config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
@@ -300,11 +325,11 @@ class TestRunCycleMultiAgentExecution:
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
-        # Both gandalf and gimli have assignments — executor called twice
-        assert mock_llm.complete_with_tools.call_count == 2
+        # 2 agents × 2 rounds each (tool call + done response) = 4 total
+        assert mock_llm.complete_with_tools.call_count == 4
 
     def test_agent_without_assignment_skips_execution(self, cycle_env) -> None:
-        """When Elrond only assigns one agent a task, only one executor call is made."""
+        """When Elrond only assigns one agent a task, only that agent's executor calls are made."""
         mock_repo = MagicMock()
         mock_repo.get_issues.return_value = []
         mock_repo.get_pulls.return_value = []
@@ -318,13 +343,8 @@ class TestRunCycleMultiAgentExecution:
         )
         elrond_resp.input_tokens = 200
         elrond_resp.output_tokens = 100
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 100
-        executor_resp.output_tokens = 40
         mock_llm.complete.return_value = elrond_resp
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
             config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
@@ -332,19 +352,15 @@ class TestRunCycleMultiAgentExecution:
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
-        assert mock_llm.complete_with_tools.call_count == 1
+        # 1 agent × 2 rounds (tool call + done response) = 2 total
+        assert mock_llm.complete_with_tools.call_count == 2
 
 
 class TestRunCyclePhases:
     """Tests for the phases-based execution model."""
 
     def _make_executor_resp(self):
-        resp = MagicMock()
-        resp.tool_calls = []
-        resp.text = "Done."
-        resp.input_tokens = 100
-        resp.output_tokens = 40
-        return resp
+        return _make_executor_side_effect()
 
     def test_phase_2_runs_after_phase_1(self, cycle_env) -> None:
         """Phase 1 agents run before phase 2 agents — execution order is preserved."""
@@ -367,17 +383,18 @@ class TestRunCyclePhases:
         mock_llm.complete.return_value = elrond_resp
 
         call_order = []
+        _cycle = _make_executor_side_effect()
 
         def executor_side_effect(**kwargs):
-            # Record which agent was called based on messages content
+            # Record which agent was called based on the initial user message content.
+            # Only log on round 1 (task message), not on pushback/tool-result rounds.
             messages = kwargs.get("messages", [])
             user_msg = next((m for m in messages if m["role"] == "user"), None)
-            if user_msg and "scout first" in user_msg["content"]:
+            if user_msg and "scout first" in user_msg["content"] and "gandalf" not in call_order:
                 call_order.append("gandalf")
-            elif user_msg and "build after scout" in user_msg["content"]:
+            elif user_msg and "build after scout" in user_msg["content"] and "gimli" not in call_order:
                 call_order.append("gimli")
-            resp = self._make_executor_resp()
-            return resp
+            return next(_cycle)
 
         mock_llm.complete_with_tools.side_effect = executor_side_effect
 
@@ -404,7 +421,7 @@ class TestRunCyclePhases:
         elrond_resp.input_tokens = 200
         elrond_resp.output_tokens = 100
         mock_llm.complete.return_value = elrond_resp
-        mock_llm.complete_with_tools.return_value = self._make_executor_resp()
+        mock_llm.complete_with_tools.side_effect = self._make_executor_resp()
 
         outcome = run_cycle(
             config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
@@ -412,7 +429,7 @@ class TestRunCyclePhases:
             repo_root=cycle_env["repo_root"],
         )
         assert outcome.status == "success"
-        assert mock_llm.complete_with_tools.call_count == 1
+        assert mock_llm.complete_with_tools.call_count == 2  # 1 agent × 2 rounds
 
     def test_unknown_agent_in_phase_skipped(self, cycle_env) -> None:
         """If Elrond assigns a task to an unknown agent name, the cycle still succeeds."""
@@ -431,16 +448,16 @@ class TestRunCyclePhases:
         elrond_resp.input_tokens = 200
         elrond_resp.output_tokens = 100
         mock_llm.complete.return_value = elrond_resp
-        mock_llm.complete_with_tools.return_value = self._make_executor_resp()
+        mock_llm.complete_with_tools.side_effect = self._make_executor_resp()
 
         outcome = run_cycle(
             config=cycle_env["config"], repo=mock_repo, llm=mock_llm,
             memory_root=cycle_env["memory_root"], philosophy=cycle_env["philosophy"],
             repo_root=cycle_env["repo_root"],
         )
-        # Aragorn is skipped; gandalf still runs
+        # Aragorn is skipped; gandalf still runs (2 rounds: tool + done)
         assert outcome.status == "success"
-        assert mock_llm.complete_with_tools.call_count == 1
+        assert mock_llm.complete_with_tools.call_count == 2
 
 
 class TestRunCycleSharedMemory:
@@ -450,7 +467,7 @@ class TestRunCycleSharedMemory:
         """Build a minimal mock LLM that returns valid Elrond response for a full cycle."""
         mock_llm = MagicMock()
         mock_llm.complete.return_value = _make_elrond_resp()
-        mock_llm.complete_with_tools.return_value = _make_executor_resp()
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
         return mock_llm
 
     def test_shared_memory_includes_non_standard_subdir(self, cycle_env) -> None:
@@ -500,13 +517,8 @@ class TestRunCycleCostPersistence:
         elrond_resp.text = '{"decision": "build it", "action_plan": "step 1", "phases": [], "flag_for_jord": false, "flag_reason": ""}'
         elrond_resp.input_tokens = 100
         elrond_resp.output_tokens = 50
-        executor_resp = MagicMock()
-        executor_resp.tool_calls = []
-        executor_resp.text = "Done."
-        executor_resp.input_tokens = 150
-        executor_resp.output_tokens = 60
         mock_llm.complete.return_value = elrond_resp
-        mock_llm.complete_with_tools.return_value = executor_resp
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
             config=cycle_env["config"],
@@ -536,7 +548,7 @@ class TestRunCycleSurveyFailure:
         # Survey should still succeed (it catches GitHub errors internally)
         # but with empty issues/PRs
         mock_llm.complete.return_value = _make_elrond_resp()
-        mock_llm.complete_with_tools.return_value = _make_executor_resp()
+        mock_llm.complete_with_tools.side_effect = _make_executor_side_effect()
 
         outcome = run_cycle(
             config=cycle_env["config"],
