@@ -3,23 +3,33 @@
 ## Budget
 Current budget: $5.00
 
+## GitHub vs. State Sync Audit (Consistency Audit)
+- **#124 (Implement CI/CD Workflow)**: Open on GitHub. Corresponding PR #126 open.
+- **#123 (Auto-Merge Agent)**: Open on GitHub. Corresponding PR #125 open.
+- **#98 (Backlog Hygiene Agent)**: **Discrepancy**. Not open on GitHub (closed or deleted), but PR #121 is still open.
+- **#119 (Tool Implementation)**: Closed on GitHub. PR #120 merged.
+- **#95, #97**: Tracked as sub-issues or drafts. Not open on GitHub.
+
 ## Open Issues
-- #119: Implement `update_issue` and `post_issue_comment` tools [essential-dependency]
-  - **Scope**: Core issue management tools for automated agents.
-  - **Status**: PR #120 open. Pending review and linting fix.
-- #98: Implement Backlog Hygiene Agent [in-progress]
-  - **Scope**: Deduplication (similarity grouping, automated closing), Priority Scoring, and automated issue promotion from auto-refined to ready.
-  - **Status**: PR #121 open (core deduplication logic). Integrates scope from #122. Pending linting fix.
+- #124: Implement CI/CD Workflow (Ruff, MyPy, Reviewdog) [enhancement]
+  - **Scope**: CI/CD pipeline for linting and testing.
+  - **Status**: PR #126 open. Immediate priority for quality research.
 - #123: Implement Auto-Merge Agent for High-Confidence Pull Requests (#97) [draft]
   - **Scope**: Automated merging for high-confidence PRs after CI passes.
-  - **Status**: Research phase.
+  - **Status**: Research phase. PR #125 open (safety gate logic).
+- #98: Implement Backlog Hygiene Agent [in-progress/orphaned?]
+  - **Scope**: Deduplication and priority scoring.
+  - **Status**: PR #121 open. Note: Issue itself is closed on GitHub.
 
 ## Closed Issues
+- #119: Implement `update_issue` and `post_issue_comment` tools [essential-dependency]
+  - **Scope**: Core issue management tools for automated agents.
+  - **Status**: PR #120 merged. Tools implemented in `brain/tools.py`.
 - #110: Implement CI/CD linting (Ruff, MyPy)
 - #122: Automate issue promotion from auto-refined to ready (#95) [merged-into-#98]
 
 ## Dependency Ordering
-Recommendation: Finalize #119 (PR #120) and #98 (PR #121) as they provide core capabilities for other agents. Fixing lint failures in both PRs is the immediate priority.
+Recommendation: Finalize #98 (PR #121) as it provides core capabilities for other agents. Fixing lint failures in PR #121 and #126 is the immediate priority.
 
 ## Draft Issues
 All draft issues require a thorough scope review before any agent begins work on them.

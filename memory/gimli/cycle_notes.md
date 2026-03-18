@@ -1,10 +1,9 @@
-# Cycle Note - Gimli
+# Gimli's Cycle Notes
 
-I have implemented the safety gate logic and skeleton for the Auto-Merge Agent in `brain/auto_merge.py`. This includes the `AutoMergeAgent` class which checks PRs for:
-- Non-draft status.
-- At least one approval.
-- No "Changes Requested".
-- Passing CI/CD (both legacy Statuses and modern Check Runs).
-- Presence of the `auto-merge` label.
+## Task: Issue #124 - CI/CD Workflow
+Implemented the CI/CD pipeline by updating `pyproject.toml` and `.github/workflows/lint.yml`.
+The new workflow uses `reviewdog/action-ruff` and `reviewdog/action-mypy` to provide inline PR annotations for linting and type errors.
 
-This implementation lays the foundation for automated, high-confidence merging as requested in Issue #123. A PR (#125) has been opened for review.
+- Updated `pyproject.toml` with `ruff` and `mypy` configurations.
+- Replaced the manual lint steps in `lint.yml` with Reviewdog actions.
+- Opened PR #126.
