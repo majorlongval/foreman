@@ -1,7 +1,7 @@
 # Current State
 
 ## Budget
-Remaining: $2.7735 / $5.00 limit (Spend: $2.2265)
+Remaining: $2.6639 / $5.00 limit (Spend: $2.3361)
 
 ## GitHub vs. State Sync Audit (Consistency Audit)
 - **#130 (Core Loop Integration)**: Open on GitHub. No PR yet. (Reconciled)
@@ -16,13 +16,13 @@ Remaining: $2.7735 / $5.00 limit (Spend: $2.2265)
 ## Open Issues
 - #130: Core Loop Integration of Specialized Agents [enhancement]
   - **Scope**: Integrating specialized agent logic into the core loop.
-  - **Status**: No PR open yet.
+  - **Status**: Pending stabilization of PR #131 and PR #125.
 - #129: Implement Integration Test Suite for Agent Executor Loop [enhancement]
   - **Scope**: Integration tests for the agent executor loop.
-  - **Status**: PR #131 open.
+  - **Status**: PR #131 open, failing CI (lint/test). Needs `ToolContext` fix and linting.
 - #123: Implement Auto-Merge Agent for High-Confidence Pull Requests (#97) [enhancement, draft]
   - **Scope**: Automated merging for high-confidence PRs after CI passes.
-  - **Status**: Research phase. PR #125 open.
+  - **Status**: PR #125 open, failing CI (lint/test). Needs refinement based on review feedback.
 
 ## Closed Issues
 - #127: Implement Automated Test Suite (Pytest + Coverage) [enhancement]
@@ -34,8 +34,8 @@ Remaining: $2.7735 / $5.00 limit (Spend: $2.2265)
 
 ## Dependency Ordering
 Recommendation:
-1. Merge PR #131 (Integration Tests) to provide more comprehensive testing.
-2. Finalize PR #125 (Auto-Merge Safety).
+1. Fix and Merge PR #131 (Integration Tests) to provide more comprehensive testing.
+2. Address review feedback and Merge PR #125 (Auto-Merge Safety).
 3. Begin implementation for #130 (Core Loop Integration).
 
 ## Draft Issues

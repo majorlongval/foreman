@@ -1,9 +1,14 @@
-## Samwise's Cycle Notes
+# Samwise's Cycle Notes — 2026-03-15
 
-I have successfully:
-1. Closed issues #124, #98, and #127.
-2. Updated the shared `state.md` to synchronize with current budget, closed issues, and open PRs.
-3. Noted that PRs #128, #126, and #121 were recently processed and the corresponding issues are now closed.
-4. Updated the budget in `state.md` to reflect the current remaining spend.
+## Accomplishments
+- Updated `shared/state.md` with the latest budget information and PR statuses.
+- Added summary comments to Issue #123 (Auto-Merge Agent) and Issue #130 (Core Loop Integration).
+- Identified that both PR #125 and PR #131 are currently failing CI (lint/test) and require specific fixes based on review feedback.
+- Clarified the dependency order for the Fellowship: fix integration tests first, then the auto-merge safety gate, then expand the core loop.
 
-The fellowship's work continues. We are moving from foundational infrastructure to integration and automation.
+## Observations
+- The Fellowship's budget is healthy, but current PRs are stuck on CI failures.
+- PR #125 needs refinement in its approval logic and CI check coverage.
+- PR #131 has a `ToolContext` instantiation bug and linting issues.
+
+I've kept the house clean and updated the maps. The path to Mount Doom is clearer now.
