@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from brain.config import Config, load_config
-from brain.cost_tracking import append_cost_entry, load_today_spend
+from brain.cost_tracking import append_cost_entry, load_today_cycles, load_today_spend
 from brain.council import run_council
 from brain.executor import execute_action
 from brain.memory import MemoryStore
@@ -55,12 +55,17 @@ def run_cycle(
     costs_dir = memory_root / "shared" / "costs"
     costs_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Check budget
+    # Step 1: Check budget and cycle cap
     spent = load_today_spend(costs_dir)
     if spent >= config.daily_limit_usd:
         log.warning("Budget exhausted — skipping cycle")
         _write_journal(memory_root, "Budget exhausted. Cycle skipped.")
         return CycleOutcome("budget_exhausted", "", "", 0.0, None)
+
+    cycles_today = load_today_cycles(costs_dir)
+    if cycles_today >= config.max_cycles_per_day:
+        log.warning(f"Max cycles reached ({cycles_today}/{config.max_cycles_per_day}) — skipping cycle")
+        return CycleOutcome("max_cycles_reached", "", "", 0.0, None)
 
     # Step 2: Survey
     try:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from brain.cost_tracking import append_cost_entry, load_today_spend
+from brain.cost_tracking import append_cost_entry, load_today_cycles, load_today_spend
 
 
 @pytest.fixture
@@ -65,3 +65,28 @@ class TestAppendCostEntry:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         lines = (costs_dir / f"{today}.jsonl").read_text().strip().split("\n")
         assert len(lines) == 3
+
+
+class TestLoadTodayCycles:
+    def test_no_file_returns_zero(self, costs_dir: Path) -> None:
+        assert load_today_cycles(costs_dir) == 0
+
+    def test_counts_council_entries_as_cycles(self, costs_dir: Path) -> None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cost_file = costs_dir / f"{today}.jsonl"
+        entries = [
+            {"action": "council", "cost_usd": 0.01},
+            {"action": "execution", "cost_usd": 0.02},
+            {"action": "execution", "cost_usd": 0.02},
+            {"action": "council", "cost_usd": 0.01},
+            {"action": "execution", "cost_usd": 0.02},
+        ]
+        cost_file.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+        # 2 council entries = 2 cycles, regardless of execution entries
+        assert load_today_cycles(costs_dir) == 2
+
+    def test_ignores_malformed_lines(self, costs_dir: Path) -> None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cost_file = costs_dir / f"{today}.jsonl"
+        cost_file.write_text('{"action": "council", "cost_usd": 0.01}\nnot-json\n{"action": "council"}\n')
+        assert load_today_cycles(costs_dir) == 2

@@ -127,6 +127,31 @@ class TestCycleOutcome:
         )
         assert outcome.status == "budget_exhausted"
 
+    def test_max_cycles_reached_skips_cycle(self, cycle_env) -> None:
+        """When today's cycle count >= max_cycles_per_day, skip immediately."""
+        import json
+        from datetime import datetime, timezone
+
+        # Pre-fill cost file with max_cycles_per_day council entries
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        costs_dir = cycle_env["memory_root"] / "shared" / "costs"
+        cost_file = costs_dir / f"{today}.jsonl"
+        entry = json.dumps({"action": "council", "cost_usd": 0.01})
+        cost_file.write_text("\n".join([entry] * 12) + "\n")  # 12 = max_cycles_per_day
+
+        mock_llm = MagicMock()
+        outcome = run_cycle(
+            config=cycle_env["config"],
+            repo=MagicMock(),
+            llm=mock_llm,
+            memory_root=cycle_env["memory_root"],
+            philosophy=cycle_env["philosophy"],
+            repo_root=cycle_env["repo_root"],
+        )
+
+        assert outcome.status == "max_cycles_reached"
+        mock_llm.complete.assert_not_called()
+
     def test_success_outcome(self) -> None:
         outcome = CycleOutcome(
             status="success",

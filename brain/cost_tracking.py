@@ -33,6 +33,25 @@ def load_today_spend(costs_dir: Path) -> float:
     return total
 
 
+def load_today_cycles(costs_dir: Path) -> int:
+    """Count completed cycles today by counting 'council' action entries."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cost_file = costs_dir / f"{today}.jsonl"
+    if not cost_file.exists():
+        return 0
+    count = 0
+    for line in cost_file.read_text().strip().split("\n"):
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+            if entry.get("action") == "council":
+                count += 1
+        except json.JSONDecodeError:
+            log.warning(f"Skipping malformed cost entry: {line}")
+    return count
+
+
 def append_cost_entry(
     costs_dir: Path,
     agent: str,
