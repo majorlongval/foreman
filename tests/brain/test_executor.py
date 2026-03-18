@@ -286,18 +286,18 @@ class TestExecuteActionDeliverable:
 
 
 class TestExecuteActionMaxRounds:
-    def test_default_max_rounds_is_8(self) -> None:
-        """DEFAULT_MAX_ROUNDS must be 8 — raised from 5 to give agents more room to act."""
+    def test_default_max_rounds_is_50(self) -> None:
+        """DEFAULT_MAX_ROUNDS is a bug guard only — budget is the real governor.
+        Set high so agents can complete multi-step tasks without hitting an artificial wall."""
         from brain.executor import DEFAULT_MAX_ROUNDS
-        assert DEFAULT_MAX_ROUNDS == 8
+        assert DEFAULT_MAX_ROUNDS == 50
 
 
 class TestExecuteActionPromptUrgency:
     """The executor prompt must tell agents to act fast, not explore endlessly.
 
-    Every cycle that ends in 'Executor hit max rounds' with nothing produced is
-    a wasted cycle. Agents were spending all 8 rounds on list_files/read_file.
-    The system prompt must cap exploration and demand swift action.
+    The daily budget is the real limit. The prompt must convey that each tool
+    call costs money and exploration should be kept to a minimum.
     """
 
     def _capture_system_prompt(self, tool_ctx: ToolContext) -> str:
@@ -316,10 +316,10 @@ class TestExecuteActionPromptUrgency:
         call_messages = mock_llm.complete_with_tools.call_args.kwargs["messages"]
         return next(m["content"] for m in call_messages if m["role"] == "system")
 
-    def test_system_prompt_includes_max_rounds_limit(self, tool_ctx: ToolContext) -> None:
-        """Agent must know how many tool calls they have so they don't waste them."""
+    def test_system_prompt_mentions_budget(self, tool_ctx: ToolContext) -> None:
+        """Agent must know each tool call costs money from the daily budget."""
         system = self._capture_system_prompt(tool_ctx)
-        assert "8" in system
+        assert "budget" in system.lower()
 
     def test_system_prompt_caps_exploration(self, tool_ctx: ToolContext) -> None:
         """Prompt must explicitly limit how many rounds agents can spend exploring."""

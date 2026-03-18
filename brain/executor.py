@@ -20,9 +20,9 @@ from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 
 log = logging.getLogger("foreman.brain.executor")
 
-# Max tool-use rounds per agent to prevent runaway loops.
-# Raised from 5 to 8 so agents have enough room to complete multi-step tasks with deliverables.
-DEFAULT_MAX_ROUNDS = 8
+# Bug guard only — the daily budget is the real governor.
+# Set high so agents can complete multi-step tasks without hitting an artificial wall.
+DEFAULT_MAX_ROUNDS = 50
 
 
 @dataclass
@@ -76,15 +76,15 @@ def execute_action(
         return ExecutionResult(summary="No task assigned — skipping execution.")
 
     tools = to_openai_tools(TOOL_SCHEMAS)
-    # The shadow grows — agents were spending all 8 rounds on list_files/read_file,
-    # hitting max rounds without producing anything. The prompt must make clear
-    # that exploration is a tax, not the work itself.
+    # The shadow grows — agents were spending all their rounds on list_files/read_file,
+    # hitting the wall without producing anything. The prompt must make clear
+    # that exploration is a tax, not the work itself. The budget is the real limit.
     system = (
         f"You are {agent_name}, an autonomous agent in a Fellowship with a purpose.\n\n"
         "The council has deliberated and assigned you a specific task. "
         "You must carry it out swiftly — the shadow grows in the East and idle "
-        f"wandering is a luxury you cannot afford.\n\n"
-        f"You have exactly {max_rounds} tool calls. "
+        "wandering is a luxury you cannot afford.\n\n"
+        "Each tool call costs tokens from the daily budget. "
         "Spend no more than 2 scouting the land (list_files, read_file). "
         "Then act. A Fellowship that only studies maps never reaches Mount Doom.\n\n"
         "When you're done, respond with a brief summary of what you accomplished."
