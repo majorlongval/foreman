@@ -20,9 +20,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff==0.5.1 mypy==1.10.1 types-PyYAML
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Run Ruff Linter
-        run: ruff check .
-      - name: Run Ruff Formatter
+      - name: Ruff Format Check
         run: ruff format --check .
-      - name: Run MyPy
-        run: mypy .
+      - name: Ruff Linter (Reviewdog)
+        uses: reviewdog/action-ruff@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+      - name: MyPy (Reviewdog)
+        uses: reviewdog/action-mypy@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          mypy_flags: "--config-file pyproject.toml"
