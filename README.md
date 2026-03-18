@@ -27,13 +27,14 @@ Agents have distinct identities (defined in `agents/*.md`), private memory, and 
 
 ## Toolset
 
-Agents have access to 16 tools:
+Agents have access to 17 tools:
 
 | Tool | Description |
 |------|-------------|
 | `list_files` | Browse the repo file tree |
 | `read_file` | Read any file from the repo |
 | `create_pr` | Create a branch, commit files (new or updated), open a PR |
+| `push_to_pr` | Push additional commits to an existing PR's branch (for addressing review feedback) |
 | `merge_pr` | Merge an approved PR (critic only) |
 | `close_pr` | Close a PR without merging |
 | `create_issue` | Open a new GitHub issue |
@@ -128,7 +129,7 @@ All state persists as git-committed files. No in-memory state between runs.
 - PyGithub (GitHub API)
 - LiteLLM — provider-agnostic LLM client (Gemini, Anthropic, OpenAI-compatible)
 - Telegram Bot for human communication
-- pytest, full TDD (141 tests)
+- pytest, full TDD (145 tests)
 
 ## See Also
 

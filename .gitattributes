@@ -1,2 +1,6 @@
 # JSONL cost files are append-only — take both sides on conflict
 memory/shared/costs/*.jsonl merge=union
+
+# Agent memory files are append-only notes — take both sides on conflict
+# This prevents rebase failures when two concurrent GHA cycles write to the same .md
+memory/**/*.md merge=union

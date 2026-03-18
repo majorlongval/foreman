@@ -1,6 +1,6 @@
 """Seed toolset — minimal tools the brain ships with on day one.
 
-Tools: read_file, create_issue, create_pr, read_memory, write_memory,
+Tools: read_file, create_issue, create_pr, push_to_pr, read_memory, write_memory,
 send_telegram, check_budget, list_issues, list_prs, list_files,
 merge_pr, close_issue, close_pr.
 """
@@ -226,6 +226,33 @@ TOOL_SCHEMAS = [
                 "comment": {"type": "string", "description": "Optional closing comment."},
             },
             "required": ["pr_number"],
+        },
+    },
+    {
+        "name": "push_to_pr",
+        "description": (
+            "Push additional commits to an existing pull request's branch. "
+            "Use this to address review feedback — do NOT open a second PR. "
+            "Finds the PR's head branch and commits the provided files there."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pr_number": {"type": "integer", "description": "PR number to push to."},
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "content": {"type": "string"},
+                        },
+                        "required": ["path", "content"],
+                    },
+                    "description": "Files to commit to the PR branch.",
+                },
+            },
+            "required": ["pr_number", "files"],
         },
     },
 ]
@@ -475,6 +502,19 @@ def _close_pr(tool_input: dict, ctx: ToolContext) -> str:
         return f"Error closing PR #{tool_input['pr_number']}: {e}"
 
 
+def _push_to_pr(tool_input: dict, ctx: ToolContext) -> str:
+    # Look up the PR to find its head branch, then commit each file there.
+    # This is the right way to address review feedback — not opening a new PR.
+    try:
+        pr = ctx.repo.get_pull(tool_input["pr_number"])
+        branch = pr.head.ref
+        for file_data in tool_input["files"]:
+            _commit_file(ctx, file_data, branch)
+        return f"Pushed {len(tool_input['files'])} file(s) to PR #{pr.number} ({branch})."
+    except Exception as e:
+        return f"Error pushing to PR #{tool_input['pr_number']}: {e}"
+
+
 def _commit_file(ctx: ToolContext, file_data: dict, branch: str) -> None:
     """Create or update a single file on the given branch.
 
@@ -523,4 +563,5 @@ _HANDLERS = {
     "merge_pr": _merge_pr,
     "close_issue": _close_issue,
     "close_pr": _close_pr,
+    "push_to_pr": _push_to_pr,
 }

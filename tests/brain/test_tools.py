@@ -443,3 +443,78 @@ class TestClosePrTool:
         tool_context.repo.get_pull.side_effect = Exception("Not found")
         result = execute_tool("close_pr", {"pr_number": 999}, tool_context)
         assert "error" in result.lower()
+
+
+class TestPushToPrTool:
+    """push_to_pr pushes additional commits to an existing PR's branch.
+
+    This is the correct way to address review feedback — rather than opening a
+    second PR that 'fixes' the first one. The tool looks up the PR's head branch
+    and commits each file there using the same create/update logic as create_pr.
+    """
+
+    def test_pushes_new_file_to_existing_pr(self, tool_context: ToolContext) -> None:
+        """Files are committed to the PR's head branch, not main."""
+        mock_pr = MagicMock()
+        mock_pr.number = 42
+        mock_pr.head.ref = "gimli/add-reviewer"
+        tool_context.repo.get_pull.return_value = mock_pr
+        # File doesn't exist yet on the branch
+        tool_context.repo.get_contents.side_effect = GithubException(404, "Not Found", None)
+
+        result = execute_tool(
+            "push_to_pr",
+            {
+                "pr_number": 42,
+                "files": [{"path": "brain/reviewer.py", "content": "# stub"}],
+            },
+            tool_context,
+        )
+
+        tool_context.repo.get_pull.assert_called_once_with(42)
+        tool_context.repo.create_file.assert_called_once_with(
+            path="brain/reviewer.py",
+            message="Add brain/reviewer.py",
+            content="# stub",
+            branch="gimli/add-reviewer",
+        )
+        assert "42" in result
+
+    def test_updates_existing_file_on_pr_branch(self, tool_context: ToolContext) -> None:
+        """If the file already exists on the branch, update_file is called."""
+        mock_pr = MagicMock()
+        mock_pr.number = 43
+        mock_pr.head.ref = "samwise/fix-tests"
+        tool_context.repo.get_pull.return_value = mock_pr
+        existing = MagicMock()
+        existing.sha = "ff0011"
+        tool_context.repo.get_contents.return_value = existing
+
+        result = execute_tool(
+            "push_to_pr",
+            {
+                "pr_number": 43,
+                "files": [{"path": "tests/test_foo.py", "content": "fixed"}],
+            },
+            tool_context,
+        )
+
+        tool_context.repo.update_file.assert_called_once_with(
+            path="tests/test_foo.py",
+            message="Update tests/test_foo.py",
+            content="fixed",
+            sha="ff0011",
+            branch="samwise/fix-tests",
+        )
+        tool_context.repo.create_file.assert_not_called()
+        assert "43" in result
+
+    def test_push_to_pr_in_schema(self) -> None:
+        """push_to_pr must appear in TOOL_SCHEMAS."""
+        names = {s["name"] for s in TOOL_SCHEMAS}
+        assert "push_to_pr" in names
+
+    def test_returns_error_on_failure(self, tool_context: ToolContext) -> None:
+        tool_context.repo.get_pull.side_effect = Exception("API error")
+        result = execute_tool("push_to_pr", {"pr_number": 99, "files": []}, tool_context)
+        assert "error" in result.lower()
