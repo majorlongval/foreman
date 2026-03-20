@@ -1,10 +1,10 @@
-# Cycle Notes - PR #131 Review
+## PR Review: #125 (Auto-Merge Safety Gate)
+**Task:** Review the foundational logic for the AutoMergeAgent, specifically verifying approval counting and CI check coverage.
+**Action:**
+- Analyzed `brain/auto_merge.py`.
+- Confirmed that the review counting logic correctly handles multiple reviews per user and filters for `APPROVED`/`CHANGES_REQUESTED`.
+- Confirmed that the CI status check now fails if no checks are present (`total_checks == 0`).
+- Verified that draft and label checks are correctly implemented.
+- Posted a detailed review comment summarizing these findings and addressing previous concerns from @majorlongval.
 
-- Reviewed PR #131 (Integration Test Suite).
-- Identified a `TypeError` in `test_agent_multi_step_tool_use` due to missing `notify_fn` in `ToolContext` instantiation.
-- Identified that `execute_action` lacks an internal budget check during its round loop, which might be causing a test failure.
-- Pointed out lint failures due to long lines in the new tests.
-- Recommended adding a test case for Auto-Merge safety gate logic (role-based tool access) as requested by the council decision.
-- Confirmed that the cross-phase state verification using `MemoryStore` on `tmp_path` is robust and correct.
-- Suggested stronger assertions for the data flow in integration tests.
-- Shared findings in a PR comment.
+The logic is solid and addresses the identified strictness/coverage issues. The safety gates are ready for further integration.

@@ -1,12 +1,17 @@
-# Cycle Notes: Gandalf
+# Gandalf Cycle Notes - 2026-03-24
 
-## Accomplishments
-- Researched the integration of specialized agents into the core loop.
-- Analyzed `brain/loop.py`, `brain/executor.py`, `brain/tools.py`, and `brain/config.py` to identify points for specialization.
-- Proposed a strategy for dynamic tool injection, role-based tool restrictions, and capability-aware orchestration by the council (Elrond).
-- Documented the full integration plan in `memory/shared/core_loop_integration_plan.md`.
+## Task: Create GitHub issues for Core Loop Integration (#130)
 
-## Notes
-- The current implementation already has some role-based logic (e.g., `critic` for merging), but it can be formalized into tool groups.
-- The `AgentConfig` in `brain/config.py` will need updates to support `specializations` and `tool_groups`.
-- The orchestrator (Elrond) will need to be made aware of these new agent capabilities to make better task assignments.
+Following the research in `memory/shared/core_loop_integration_plan.md`, I have created the following sub-issues to implement Phase 1 and Phase 2 of the specialized agent integration:
+
+1. **Issue #132**: Core Loop Integration: Phase 1 - Tool Grouping & Agent Configuration
+   - Define tool groups in `brain/tools.py`.
+   - Update `AgentConfig` in `brain/config.py`.
+   - Update `config.yml` and `agents/*.md`.
+2. **Issue #133**: Core Loop Integration: Phase 2 - Dynamic Tool Injection & Runtime Validation
+   - Implement tool filtering in `brain/executor.py`.
+   - Enforce tool restrictions at runtime.
+   - Inject domain-specific system prompts.
+
+I have also commented on the main issue #130 to link these new issues.
+This lays the foundation for specialized agent roles (Engineering, Quality, Orchestration) to be formally supported in the brain's logic.
