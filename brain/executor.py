@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import List
 
+from brain.cost_tracking import load_today_spend
 from brain.llm_client import estimate_cost
 from brain.tools import TOOL_SCHEMAS, ToolContext, execute_tool
 
@@ -124,6 +125,12 @@ def execute_action(
 
     try:
         for _round_num in range(max_rounds):
+            # Check budget before calling LLM
+            current_spend = load_today_spend(tool_ctx.costs_dir)
+            if (current_spend + total_cost) >= tool_ctx.budget_limit:
+                log.warning(f"Executor hit budget limit for {agent_name}")
+                break
+
             response = llm.complete_with_tools(
                 model=model,
                 messages=messages,
@@ -173,8 +180,11 @@ def execute_action(
                     }
                 )
 
-        log.warning(f"Executor hit max rounds ({max_rounds}) for {agent_name}")
-        summary = f"Reached max rounds ({max_rounds}). " + _summarize_actions(actions_taken)
+        if (current_spend + total_cost) >= tool_ctx.budget_limit:
+            summary = f"Stopped due to budget limit. " + _summarize_actions(actions_taken)
+        else:
+            log.warning(f"Executor hit max rounds ({max_rounds}) for {agent_name}")
+            summary = f"Reached max rounds ({max_rounds}). " + _summarize_actions(actions_taken)
         return ExecutionResult(summary=summary, cost_usd=total_cost)
 
     except Exception as e:
